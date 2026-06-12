@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:7734">
+  <title>Eve — App Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Title bar -->
+  <div class="titlebar">
+    <span class="titlebar-title">APP MANAGER</span>
+    <span class="titlebar-sub">Configure voice-launchable applications</span>
+  </div>
+
+  <div class="workspace">
+
+    <!-- LEFT: Discovered apps -->
+    <div class="panel" id="panel-discovered">
+      <div class="panel-hdr">
+        <span class="panel-label">INSTALLED APPS</span>
+        <button class="scan-btn" id="scan-btn">Scan</button>
+      </div>
+      <div class="search-row">
+        <input class="search-input" id="search" type="text" placeholder="Search apps…" autocomplete="off" spellcheck="false">
+        <span class="found-count" id="found-count"></span>
+      </div>
+      <div class="app-list" id="discovered-list">
+        <div class="list-placeholder" id="placeholder">
+          <div class="placeholder-icon">⬡</div>
+          <div class="placeholder-text">Click Scan to discover installed apps</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="divider"></div>
+
+    <!-- RIGHT: Configured apps -->
+    <div class="panel" id="panel-configured">
+      <div class="panel-hdr">
+        <span class="panel-label">CONFIGURED</span>
+        <span class="panel-sub" id="configured-count">0 apps</span>
+      </div>
+
+      <div class="configured-list" id="configured-list">
+        <div class="configured-empty" id="configured-empty">
+          No apps configured.<br>Check apps on the left to add them.
+        </div>
+      </div>
+
+      <div class="manual-add">
+        <div class="manual-label">MANUAL ADD</div>
+        <div class="manual-row">
+          <input class="manual-input" id="manual-spoken" type="text" placeholder="Spoken name" autocomplete="off" spellcheck="false">
+          <input class="manual-input path-input" id="manual-path" type="text" placeholder="Path to .exe" autocomplete="off" spellcheck="false">
+          <button class="add-btn" id="add-btn">+</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <span class="status-msg" id="status-msg">Not connected</span>
+    <button class="save-btn" id="save-btn">Save</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

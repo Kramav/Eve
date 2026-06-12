@@ -4,9 +4,15 @@ let ws = null
 
 function connect() {
   ws = new WebSocket(WS_URL)
-  ws.onmessage = e => { try { applyState(JSON.parse(e.data)) } catch (_) {} }
-  ws.onclose   = ()  => setTimeout(connect, 500)
-  ws.onerror   = ()  => {}
+  ws.onmessage = e => {
+    try {
+      const msg = JSON.parse(e.data)
+      if (msg.type === 'state')            applyState(msg)
+      else if (msg.type === 'open_app_manager') window.eve.openAppManager()
+    } catch (_) {}
+  }
+  ws.onclose = () => setTimeout(connect, 500)
+  ws.onerror = () => {}
 }
 
 function send(action, data = {}) {

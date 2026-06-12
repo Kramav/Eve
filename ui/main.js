@@ -4,8 +4,10 @@ const path = require('path')
 const COMPACT  = { w: 96,  h: 96  }
 const EXPANDED = { w: 380, h: 620 }
 
-let win = null
+let win           = null
+let appManagerWin = null
 
+// ── Overlay window ─────────────────────────────────────────────────────────
 function createWindow() {
   const { width: sw } = screen.getPrimaryDisplay().bounds
 
@@ -28,7 +30,7 @@ function createWindow() {
   win.loadFile(path.join(__dirname, 'src', 'index.html'))
 }
 
-// Renderer asks to resize when HUD is toggled
+// Resize/reposition overlay when HUD is toggled
 ipcMain.on('set-size', (_, { compact }) => {
   if (!win) return
   const { width: sw } = screen.getPrimaryDisplay().bounds
@@ -41,5 +43,35 @@ ipcMain.on('set-size', (_, { compact }) => {
   }
 })
 
+// ── App Manager window ─────────────────────────────────────────────────────
+function openAppManager() {
+  if (appManagerWin && !appManagerWin.isDestroyed()) {
+    appManagerWin.focus()
+    return
+  }
+
+  appManagerWin = new BrowserWindow({
+    width:           860,
+    height:          620,
+    minWidth:        640,
+    minHeight:       460,
+    title:           'Eve — App Manager',
+    backgroundColor: '#080e18',
+    frame:           true,
+    resizable:       true,
+    webPreferences: {
+      preload:          path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+    },
+  })
+
+  appManagerWin.setMenuBarVisibility(false)
+  appManagerWin.loadFile(path.join(__dirname, 'src', 'app-manager', 'index.html'))
+  appManagerWin.on('closed', () => { appManagerWin = null })
+}
+
+ipcMain.on('open-app-manager', openAppManager)
+
+// ── Lifecycle ──────────────────────────────────────────────────────────────
 app.whenReady().then(createWindow)
 app.on('window-all-closed', () => app.quit())

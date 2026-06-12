@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 
 # NOTE: pywebview was removed. Transparency on Windows with pywebview's EdgeChromium
 # backend is unreliable — background_color='#00000000' raises ValueError (only 3/6-char
@@ -16,8 +17,12 @@ from datetime import datetime
 # Architecture: Python runs a WebSocket server (port 7734). display.py methods
 # update state and broadcast JSON to all connected Electron clients. Electron
 # sends back actions (e.g. toggle_hud) as JSON messages.
+#
+# All messages include a "type" field so multiple windows (overlay, app manager)
+# can filter for the messages they care about.
 
-WS_PORT = 7734
+WS_PORT   = 7734
+APPS_FILE = Path(__file__).parent.parent / 'apps.json'
 
 
 class Display:
@@ -53,7 +58,7 @@ class Display:
             try:
                 async for msg in ws:
                     try:
-                        self._handle_action(json.loads(msg))
+                        self._handle_action(json.loads(msg), ws)
                     except Exception:
                         pass
             except Exception:
@@ -62,25 +67,34 @@ class Display:
                 self._clients.discard(ws)
 
         async with websockets.serve(handler, '127.0.0.1', WS_PORT):
-            await asyncio.Future()   # run forever
+            await asyncio.Future()
 
     def _snapshot(self):
         with self._lock:
             s = dict(self._state)
-            s['log_entries']          = list(self._state['log_entries'])
-            self._state['log_entries'] = []   # consume so entries arrive exactly once
+            s['type']                  = 'state'
+            s['log_entries']           = list(self._state['log_entries'])
+            self._state['log_entries'] = []
             return json.dumps(s)
 
-    def _handle_action(self, data):
+    def _handle_action(self, data, ws):
         action = data.get('action')
         if action == 'toggle_hud':
             self.toggle_overlay()
+        elif action == 'get_apps_config':
+            asyncio.run_coroutine_threadsafe(
+                self._send_apps_config(ws), self._loop)
+        elif action == 'scan_apps':
+            asyncio.run_coroutine_threadsafe(
+                self._do_scan(ws), self._loop)
+        elif action == 'save_apps':
+            self._save_apps(data.get('apps', []), ws)
 
     def _broadcast(self):
         payload = self._snapshot()
-        asyncio.run_coroutine_threadsafe(self._push(payload), self._loop)
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
 
-    async def _push(self, payload):
+    async def _push_all(self, payload):
         dead = set()
         for ws in list(self._clients):
             try:
@@ -88,6 +102,46 @@ class Display:
             except Exception:
                 dead.add(ws)
         self._clients -= dead
+
+    async def _push_one(self, ws, payload):
+        try:
+            await ws.send(payload)
+        except Exception:
+            self._clients.discard(ws)
+
+    # ── App manager actions ─────────────────────────────────────────────────
+
+    async def _send_apps_config(self, ws):
+        configured = self._load_apps()
+        payload = json.dumps({'type': 'apps_config', 'configured': configured})
+        await self._push_one(ws, payload)
+
+    async def _do_scan(self, ws):
+        from core import app_scanner
+        loop = asyncio.get_event_loop()
+        discovered = await loop.run_in_executor(None, app_scanner.scan)
+        configured = self._load_apps()
+        payload = json.dumps({
+            'type':       'scan_result',
+            'discovered': discovered,
+            'configured': configured,
+        })
+        await self._push_one(ws, payload)
+
+    def _save_apps(self, apps: list, ws):
+        try:
+            APPS_FILE.write_text(json.dumps(apps, indent=2))
+            result = {'type': 'save_result', 'success': True}
+        except Exception as e:
+            result = {'type': 'save_result', 'success': False, 'error': str(e)}
+        asyncio.run_coroutine_threadsafe(
+            self._push_one(ws, json.dumps(result)), self._loop)
+
+    def _load_apps(self) -> list:
+        try:
+            return json.loads(APPS_FILE.read_text())
+        except Exception:
+            return []
 
     # ── run_loop: launch Electron, block until it exits ─────────────────────
 
@@ -106,7 +160,13 @@ class Display:
         except KeyboardInterrupt:
             proc.terminate()
 
-    # ── Public API (same interface as before) ───────────────────────────────
+    # ── Public API: trigger app manager from Python ─────────────────────────
+
+    def open_app_manager(self):
+        payload = json.dumps({'type': 'open_app_manager'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    # ── Public API: HUD state (same interface as before) ────────────────────
 
     def show(self, status: str = '', text: str = '', color: str = 'idle'):
         with self._lock:

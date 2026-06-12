@@ -19,6 +19,12 @@ _OVERLAY_TOGGLE = re.compile(
     r"|^overlay(?: on| off)?$"
 )
 
+_MANAGE_APPS = re.compile(
+    r"\b(manage|open|show|edit|configure)\b.{0,20}\bapps?\b"
+    r"|\bapp\s+manager\b",
+    re.I,
+)
+
 
 def main():
     print("Starting Eve...")
@@ -70,6 +76,11 @@ def main():
 
             if _OVERLAY_TOGGLE.search(text.lower()):
                 display.toggle_overlay()
+                delay = 0
+                return
+
+            if _MANAGE_APPS.search(text):
+                display.open_app_manager()
                 delay = 0
                 return
 
