@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Eve runtime data
+.eve/
+custom_commands.json
+aliases.json
+apps.json
+
+# Wake word model cache (downloaded on first run)
+*.onnx
+*.tflite
+
+# Whisper model cache
+*.bin
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.suo
+*.user
