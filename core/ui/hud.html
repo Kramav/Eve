@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --idle:    #4a9eff;
+  --listen:  #ff8c00;
+  --always:  #ff3355;
+  --process: #00d4ff;
+  --play:    #00e87a;
+  --bg:      rgba(5, 9, 16, 0.92);
+  --text:    #c4dff5;
+  --dim:     #2a4460;
+  --sep:     rgba(74, 158, 255, 0.07);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: var(--text);
+  user-select: none; -webkit-user-select: none;
+}
+
+/* ── Root layout ──────────────────────────────────────────────────── */
+/* Use min-content height in compact mode so forced-tall windows don't
+   render a visible background below the orb. height: 100% is restored
+   when the HUD is open (needs to fill the full expanded window). */
+.root {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: min-content;
+}
+
+body.hud-open .root {
+  height: 100%;
+}
+
+/* ── Circle row (always visible) ────────────────────────────────── */
+.circle-row {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 10px 10px 0 0;
+  height: 94px;
+  -webkit-app-region: drag;
+}
+
+.orb-wrap {
+  position: relative;
+  width: 80px; height: 80px;
+  -webkit-app-region: no-drag;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+#orb {
+  width: 80px; height: 80px;
+  display: block;
+}
+
+/* Active-listening badge */
+.al-badge {
+  position: absolute;
+  top: 2px; right: 2px;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--always);
+  box-shadow: 0 0 6px var(--always), 0 0 12px rgba(255,51,85,0.4);
+  display: none;
+  animation: badge-breathe 1.6s ease-in-out infinite;
+}
+body.always-on .al-badge { display: block; }
+
+@keyframes badge-breathe {
+  0%,100% { transform: scale(1);    opacity: 1; }
+  50%      { transform: scale(0.8); opacity: 0.5; }
+}
+
+/* ── HUD panel ───────────────────────────────────────────────────── */
+.hud {
+  flex: 1;
+  display: none;
+  flex-direction: column;
+  background: var(--bg);
+  border: 1px solid rgba(74,158,255,0.09);
+  border-radius: 8px;
+  margin: 0 8px 8px 8px;
+  overflow: hidden;
+  min-height: 0;
+  animation: hud-in 0.18s ease-out;
+}
+body.hud-open .hud { display: flex; }
+
+@keyframes hud-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── HUD header ──────────────────────────────────────────────────── */
+.hud-hdr {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px 7px;
+  border-bottom: 1px solid var(--sep);
+}
+
+.hud-name {
+  font-size: 8px;
+  letter-spacing: 4px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.hud-state {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 8px;
+  letter-spacing: 2px;
+  color: var(--dim);
+  text-transform: uppercase;
+  transition: color 0.3s;
+}
+
+.state-dot {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--dim);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+body.listening  .hud-state { color: var(--listen); }
+body.listening  .state-dot { background: var(--listen); box-shadow: 0 0 5px var(--listen); animation: dot-blink 0.9s ease-in-out infinite; }
+body.always-on  .hud-state { color: var(--always); }
+body.always-on  .state-dot { background: var(--always); box-shadow: 0 0 5px var(--always); }
+body.processing .hud-state { color: var(--process); }
+body.processing .state-dot { background: var(--process); }
+
+@keyframes dot-blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+/* ── Live listening area ─────────────────────────────────────────── */
+.live {
+  flex-shrink: 0;
+  display: none;
+  flex-direction: column;
+  gap: 7px;
+  padding: 9px 12px 10px;
+  border-bottom: 1px solid var(--sep);
+  background: rgba(255,140,0,0.03);
+  animation: live-in 0.15s ease-out;
+}
+body.listening .live { display: flex; }
+
+@keyframes live-in {
+  from { opacity:0; } to { opacity:1; }
+}
+
+body.always-on:not(.listening) .live {
+  display: flex;
+  background: rgba(255,51,85,0.03);
+}
+
+.live-top {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.live-mic {
+  font-size: 10px;
+  color: var(--listen);
+  animation: mic-pulse 0.9s ease-in-out infinite;
+}
+body.always-on .live-mic { color: var(--always); }
+
+@keyframes mic-pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.live-label {
+  font-size: 7px;
+  letter-spacing: 3px;
+  color: var(--listen);
+  text-transform: uppercase;
+}
+body.always-on .live-label { color: var(--always); }
+
+/* Waveform */
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 24px;
+}
+
+.wv {
+  width: 2.5px;
+  border-radius: 2px;
+  background: var(--listen);
+  opacity: 0.65;
+  height: 3px;
+}
+
+body.listening .wv,
+body.always-on .wv {
+  animation: wv-anim 0.7s ease-in-out infinite;
+}
+
+body.always-on .wv { background: var(--always); }
+
+.wv:nth-child(1)  { animation-delay:0s;    --ph:16px }
+.wv:nth-child(2)  { animation-delay:.05s;  --ph:22px }
+.wv:nth-child(3)  { animation-delay:.10s;  --ph:14px }
+.wv:nth-child(4)  { animation-delay:.15s;  --ph:20px }
+.wv:nth-child(5)  { animation-delay:.20s;  --ph:24px }
+.wv:nth-child(6)  { animation-delay:.25s;  --ph:18px }
+.wv:nth-child(7)  { animation-delay:.30s;  --ph:22px }
+.wv:nth-child(8)  { animation-delay:.35s;  --ph:16px }
+.wv:nth-child(9)  { animation-delay:.40s;  --ph:20px }
+.wv:nth-child(10) { animation-delay:.45s;  --ph:14px }
+.wv:nth-child(11) { animation-delay:.50s;  --ph:18px }
+.wv:nth-child(12) { animation-delay:.55s;  --ph:10px }
+.wv:nth-child(13) { animation-delay:.60s;  --ph:16px }
+.wv:nth-child(14) { animation-delay:.65s;  --ph:12px }
+
+@keyframes wv-anim {
+  0%,100% { height:3px;        opacity:0.3; }
+  50%     { height:var(--ph);  opacity:0.9; }
+}
+
+.transcript {
+  font-size: 10px;
+  color: var(--text);
+  opacity: 0.8;
+  font-style: italic;
+  min-height: 13px;
+  line-height: 1.4;
+}
+
+/* ── Video list ───────────────────────────────────────────────────── */
+.vlist {
+  flex-shrink: 0;
+  display: none;
+  flex-direction: column;
+  border-bottom: 1px solid var(--sep);
+  padding: 6px 0;
+}
+.vlist.visible { display: flex; }
+
+.vlist-hdr {
+  font-size: 7px;
+  letter-spacing: 3px;
+  color: var(--process);
+  padding: 2px 12px 6px;
+  text-transform: uppercase;
+}
+
+.vlist-item {
+  font-size: 9.5px;
+  padding: 5px 12px;
+  color: var(--text);
+  border-left: 2px solid transparent;
+  opacity: 0.8;
+  line-height: 1.4;
+}
+.vlist-item:hover { border-left-color: var(--process); opacity: 1; }
+
+/* ── History feed ─────────────────────────────────────────────────── */
+.feed {
+  flex: 1;
+  overflow-y: auto; overflow-x: hidden;
+  min-height: 0;
+  padding: 4px 0;
+}
+.feed::-webkit-scrollbar { width: 2px; }
+.feed::-webkit-scrollbar-track { background: transparent; }
+.feed::-webkit-scrollbar-thumb { background: var(--sep); border-radius: 1px; }
+
+.feed-empty {
+  display: flex;
+  align-items: center; justify-content: center;
+  height: 100%;
+  font-size: 8px; letter-spacing: 3px;
+  color: var(--dim); text-transform: uppercase;
+}
+
+.entry {
+  padding: 6px 12px;
+  border-left: 2px solid transparent;
+  transition: background 0.2s;
+}
+.entry:nth-child(odd) { background: rgba(74,158,255,0.02); }
+
+.entry.heard   { border-left-color: rgba(0,212,255,0.45); }
+.entry.action  { border-left-color: rgba(0,232,122,0.35); }
+.entry.error   { border-left-color: rgba(255,60,60,0.45); }
+
+.e-meta {
+  display: flex;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.e-tag {
+  font-size: 7px; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--dim);
+}
+.entry.heard  .e-tag { color: rgba(0,212,255,0.7); }
+.entry.action .e-tag { color: rgba(0,232,122,0.65); }
+.entry.error  .e-tag { color: rgba(255,80,80,0.75); }
+
+.e-ts {
+  font-size: 7px; color: var(--dim);
+  margin-left: auto;
+}
+
+.e-text {
+  font-size: 9.5px; color: var(--text);
+  opacity: 0.88; line-height: 1.45;
+}
+.entry.system .e-text { color: var(--dim); font-size: 9px; }
+
+/* ── Footer ───────────────────────────────────────────────────────── */
+.foot {
+  flex-shrink: 0;
+  display: flex; align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px;
+  border-top: 1px solid var(--sep);
+}
+
+.foot-clock {
+  font-size: 9px; letter-spacing: 2px; color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.foot-btn {
+  background: none; border: none; cursor: pointer;
+  font-family: inherit; font-size: 7px; letter-spacing: 2px;
+  color: var(--dim); padding: 2px 5px; border-radius: 2px;
+  text-transform: uppercase; transition: color 0.2s;
+}
+.foot-btn:hover { color: var(--text); }
+
+/* ── Always-on bar (bottom of HUD) ──────────────────────────────── */
+.always-bar {
+  flex-shrink: 0;
+  display: none;
+  align-items: center; justify-content: center;
+  gap: 8px;
+  padding: 5px 12px;
+  background: rgba(255,51,85,0.07);
+  border-top: 1px solid rgba(255,51,85,0.12);
+}
+body.always-on .always-bar { display: flex; }
+
+.always-dot {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--always);
+  animation: badge-breathe 1.6s ease-in-out infinite;
+}
+
+.always-text {
+  font-size: 7px; letter-spacing: 3px;
+  color: var(--always); opacity: 0.75;
+  text-transform: uppercase;
+}
+</style>
+</head>
+<body>
+
+<div class="root">
+
+  <!-- Circle row: always visible -->
+  <div class="circle-row">
+    <div class="orb-wrap" onclick="toggleHud()" title="Toggle history">
+      <canvas id="orb" width="160" height="160"></canvas>
+      <div class="al-badge"></div>
+    </div>
+  </div>
+
+  <!-- HUD panel -->
+  <div class="hud">
+
+    <div class="hud-hdr">
+      <span class="hud-name">Activity</span>
+      <div class="hud-state">
+        <div class="state-dot"></div>
+        <span id="state-label">Idle</span>
+      </div>
+    </div>
+
+    <!-- Live listening area -->
+    <div class="live">
+      <div class="live-top">
+        <span class="live-mic">●</span>
+        <span class="live-label" id="live-label">Listening</span>
+      </div>
+      <div class="waveform">
+        <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+        <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+        <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+        <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+        <div class="wv"></div><div class="wv"></div>
+      </div>
+      <div class="transcript" id="transcript"></div>
+    </div>
+
+    <!-- Video list -->
+    <div class="vlist" id="vlist">
+      <div class="vlist-hdr" id="vlist-hdr"></div>
+      <div id="vlist-items"></div>
+    </div>
+
+    <!-- History feed -->
+    <div class="feed" id="feed">
+      <div class="feed-empty" id="feed-empty">No history</div>
+    </div>
+
+    <div class="foot">
+      <span class="foot-clock" id="clock"></span>
+      <button class="foot-btn" onclick="clearFeed()">Clear</button>
+    </div>
+
+    <div class="always-bar">
+      <div class="always-dot"></div>
+      <span class="always-text">Always listening — no wake word</span>
+      <div class="always-dot"></div>
+    </div>
+
+  </div><!-- /hud -->
+
+</div><!-- /root -->
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let evMode        = 'idle';
+let evAlwaysOn    = false;
+let evHudOpen     = false;
+
+// ── Canvas orb ─────────────────────────────────────────────────────────────
+const canvas = document.getElementById('orb');
+const ctx    = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height, CX = W/2, CY = H/2;
+
+const COLORS = {
+  idle:       [74,  158, 255],
+  listening:  [255, 140, 0  ],
+  processing: [0,   212, 255],
+  playing:    [0,   232, 122],
+};
+const ALWAYS_RGB = [255, 51, 85];
+
+function orbColor(alpha) {
+  const [r,g,b] = evAlwaysOn && evMode === 'idle'
+    ? ALWAYS_RGB
+    : (COLORS[evMode] || COLORS.idle);
+  return alpha === undefined ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${alpha})`;
+}
+
+function drawOrb(ts) {
+  const t = ts * 0.001;
+  ctx.clearRect(0, 0, W, H);
+
+  const isActive = evMode === 'listening' || evAlwaysOn;
+  const pulse = (Math.sin(t * (isActive ? 4.5 : 1.6)) + 1) / 2;
+
+  // Ambient aura
+  const aura = ctx.createRadialGradient(CX, CY, 0, CX, CY, 68);
+  aura.addColorStop(0, orbColor(0.10 + pulse * 0.08));
+  aura.addColorStop(1, 'transparent');
+  ctx.fillStyle = aura;
+  ctx.fillRect(0, 0, W, H);
+
+  // Outer dim ring
+  _ring(62, 0, Math.PI*2, orbColor(0.06 + pulse*0.04), 1, 0);
+
+  // Segmented slow-rotating ring
+  ctx.save();
+  _pivot(t * 0.06);
+  ctx.setLineDash([12, 9]);
+  _ring(56, 0, Math.PI*2, orbColor(0.09), 1, 0);
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Primary mode arc
+  {
+    const spd  = {idle:0.10, listening:0.65, processing:2.0, playing:0.22}[evMode] || 0.10;
+    const ext  = evMode === 'processing' ? Math.PI*0.55 : Math.PI*2;
+    const lw   = evMode === 'idle' ? 1.5 : 2.5;
+    const glow = isActive ? 14 : 7;
+    ctx.save();
+    _pivot(t * spd - Math.PI/2);
+    _ring(48, -Math.PI/2, -Math.PI/2 + ext, orbColor(0.55 + pulse*0.3), lw, glow);
+    ctx.restore();
+  }
+
+  // Inner depth ring
+  _ring(36, 0, Math.PI*2, orbColor(0.06 + pulse*0.04), 1, 0);
+
+  // Core body
+  ctx.beginPath(); ctx.arc(CX, CY, 24, 0, Math.PI*2);
+  ctx.fillStyle = '#020810'; ctx.fill();
+  ctx.strokeStyle = orbColor(0.18 + pulse*0.18);
+  ctx.lineWidth = 1.5;
+  ctx.shadowBlur = 9; ctx.shadowColor = orbColor();
+  ctx.stroke(); ctx.shadowBlur = 0;
+
+  // Core glow fill
+  const cg = ctx.createRadialGradient(CX, CY, 0, CX, CY, 24);
+  cg.addColorStop(0, orbColor(0.20 + pulse*0.16));
+  cg.addColorStop(1, 'transparent');
+  ctx.fillStyle = cg;
+  ctx.beginPath(); ctx.arc(CX, CY, 24, 0, Math.PI*2); ctx.fill();
+
+  // Hot center
+  ctx.beginPath(); ctx.arc(CX, CY, 5, 0, Math.PI*2);
+  ctx.fillStyle = orbColor(0.55 + pulse*0.45);
+  ctx.shadowBlur = 8; ctx.shadowColor = orbColor();
+  ctx.fill(); ctx.shadowBlur = 0;
+
+  // Waveform bars inside orb (listening / always-on)
+  if (evMode === 'listening' || evAlwaysOn) {
+    const n=7, bw=2.5, gap=2;
+    const sx = CX - (n*(bw+gap)-gap)/2;
+    for (let i=0; i<n; i++) {
+      const ph = t*5.5 + i*0.65;
+      const bh = 4 + Math.abs(Math.sin(ph)) * 14;
+      const bx = sx + i*(bw+gap);
+      const by = CY - bh/2;
+      ctx.fillStyle = orbColor(0.5 + Math.abs(Math.sin(ph))*0.5);
+      ctx.shadowBlur = 5; ctx.shadowColor = orbColor();
+      _roundRect(bx, by, bw, bh, 1.5);
+      ctx.fill(); ctx.shadowBlur = 0;
+    }
+  }
+
+  // Processing scan line
+  if (evMode === 'processing') {
+    const sy = CY - 36 + ((t*38)%72);
+    const d  = Math.abs(sy-CY)/36;
+    const sa = (1 - d*0.5) * 0.55;
+    ctx.strokeStyle = orbColor(sa*0.3); ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(CX-40, sy); ctx.lineTo(CX+40, sy); ctx.stroke();
+    ctx.strokeStyle = orbColor(sa*0.8); ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(CX-32, sy); ctx.lineTo(CX+32, sy); ctx.stroke();
+  }
+
+  requestAnimationFrame(drawOrb);
+}
+
+function _ring(r, s, e, color, lw, glow) {
+  ctx.save();
+  if (glow>0) { ctx.shadowBlur=glow; ctx.shadowColor=color; }
+  ctx.strokeStyle=color; ctx.lineWidth=lw;
+  ctx.beginPath(); ctx.arc(CX,CY,r,s,e); ctx.stroke();
+  ctx.restore();
+}
+function _pivot(a) {
+  ctx.translate(CX,CY); ctx.rotate(a); ctx.translate(-CX,-CY);
+}
+function _roundRect(x,y,w,h,r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,  x+w,y+r);
+  ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y);
+  ctx.closePath();
+}
+
+requestAnimationFrame(drawOrb);
+
+// ── Clock ──────────────────────────────────────────────────────────────────
+(function tickClock() {
+  const n=new Date(), p=v=>String(v).padStart(2,'0');
+  const el=document.getElementById('clock');
+  if (el) el.textContent=`${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`;
+  setTimeout(tickClock,1000);
+})();
+
+// ── History feed ───────────────────────────────────────────────────────────
+const KIND = { heard:'You', action:'Eve', error:'Error', system:'Sys' };
+let entryCount = 0;
+
+function appendEntry(e) {
+  const feed  = document.getElementById('feed');
+  const empty = document.getElementById('feed-empty');
+  if (empty) empty.style.display = 'none';
+
+  if (entryCount >= 200) {
+    const first = feed.querySelector('.entry');
+    if (first) { feed.removeChild(first); entryCount--; }
+  }
+
+  const div  = document.createElement('div');
+  div.className = `entry ${e.kind}`;
+
+  const meta = document.createElement('div'); meta.className='e-meta';
+  const tag  = document.createElement('span'); tag.className='e-tag';
+  tag.textContent = KIND[e.kind] || e.kind;
+  const ts   = document.createElement('span'); ts.className='e-ts';
+  ts.textContent = e.ts;
+  meta.append(tag, ts);
+
+  const txt  = document.createElement('div'); txt.className='e-text';
+  txt.textContent = e.text;
+
+  div.append(meta, txt);
+  feed.appendChild(div);
+  entryCount++;
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function clearFeed() {
+  const feed  = document.getElementById('feed');
+  feed.querySelectorAll('.entry').forEach(el=>el.remove());
+  entryCount = 0;
+  const empty = document.getElementById('feed-empty');
+  if (empty) empty.style.display = '';
+}
+
+// ── Apply state ────────────────────────────────────────────────────────────
+let prev = {};
+
+function applyState(s) {
+  const mode        = s.mode        || 'idle';
+  const alwaysOn    = !!s.active_listening;
+  const hudOpen     = !!s.hud_visible;
+
+  evMode      = mode;
+  evAlwaysOn  = alwaysOn;
+  evHudOpen   = hudOpen;
+
+  // Body classes drive CSS modes
+  const cls = [];
+  if (mode === 'listening')  cls.push('listening');
+  if (mode === 'processing') cls.push('processing');
+  if (alwaysOn)              cls.push('always-on');
+  if (hudOpen)               cls.push('hud-open');
+  document.body.className = cls.join(' ');
+
+  // State label
+  if (s.mode !== prev.mode || s.status_text !== prev.status_text) {
+    const labels = { idle:'Idle', listening:'Listening', processing:'Thinking', playing:'Playing' };
+    document.getElementById('state-label').textContent =
+      s.status_text || labels[mode] || 'Idle';
+  }
+
+  // Live label (always-on vs triggered listening)
+  if (alwaysOn && mode !== 'listening') {
+    document.getElementById('live-label').textContent = 'Always On';
+  } else {
+    document.getElementById('live-label').textContent = 'Listening';
+  }
+
+  // Transcript
+  if (s.main_text !== prev.main_text) {
+    document.getElementById('transcript').textContent = s.main_text || '';
+  }
+
+  // Log entries
+  for (const e of (s.log_entries || [])) appendEntry(e);
+
+  // Video list
+  const listKey = JSON.stringify(s.list_items);
+  if (listKey !== prev.listKey) {
+    const vlist = document.getElementById('vlist');
+    if (s.list_items && s.list_items.length > 0) {
+      document.getElementById('vlist-hdr').textContent = s.list_status || 'Results';
+      const container = document.getElementById('vlist-items');
+      container.innerHTML = '';
+      s.list_items.forEach(item => {
+        const d = document.createElement('div');
+        d.className = 'vlist-item';
+        d.textContent = item;
+        container.appendChild(d);
+      });
+      vlist.classList.add('visible');
+    } else {
+      vlist.classList.remove('visible');
+    }
+    prev.listKey = listKey;
+  }
+
+  prev = { mode: s.mode, status_text: s.status_text, main_text: s.main_text,
+           active_listening: s.active_listening, hud_visible: s.hud_visible,
+           listKey: prev.listKey };
+}
+
+// ── Polling ────────────────────────────────────────────────────────────────
+async function pollState() {
+  try {
+    const s = await pywebview.api.getState();
+    applyState(s);
+  } catch(_) {}
+  setTimeout(pollState, 80);
+}
+
+// ── Actions ────────────────────────────────────────────────────────────────
+function toggleHud() {
+  if (window.pywebview) pywebview.api.toggleHud();
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────
+function waitForBridge() {
+  if (window.pywebview && pywebview.api) {
+    pywebview.api.setScreenWidth(screen.width);
+    pywebview.api.ready();
+    pollState();
+  } else {
+    setTimeout(waitForBridge, 100);
+  }
+}
+window.addEventListener('load', waitForBridge);
+</script>
+</body>
+</html>

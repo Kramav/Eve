@@ -19,3 +19,8 @@ yt-dlp>=2024.1.0
 
 # ── Thumbnail display in the visual overlay ───────────────────────────────────
 Pillow>=10.0.0
+
+# ── UI bridge ─────────────────────────────────────────────────────────────────
+# Electron (ui/) handles the transparent overlay window.
+# websockets provides the Python WebSocket server that pushes state to Electron.
+websockets>=12.0

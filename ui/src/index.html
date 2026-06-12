@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:7734">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="root">
+
+    <!-- Circle indicator: always visible -->
+    <div class="circle-row">
+      <div class="orb-wrap" id="orb-wrap">
+        <canvas id="orb" width="160" height="160"></canvas>
+        <div class="al-badge"></div>
+      </div>
+    </div>
+
+    <!-- HUD panel: shown when body.hud-open -->
+    <div class="hud">
+
+      <div class="hud-hdr">
+        <span class="hud-name">Activity</span>
+        <div class="hud-state">
+          <div class="state-dot"></div>
+          <span id="state-label">Idle</span>
+        </div>
+      </div>
+
+      <!-- Live listening area -->
+      <div class="live">
+        <div class="live-top">
+          <span class="live-mic">●</span>
+          <span class="live-label" id="live-label">Listening</span>
+        </div>
+        <div class="waveform">
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div><div class="wv"></div><div class="wv"></div>
+          <div class="wv"></div><div class="wv"></div>
+        </div>
+        <div class="transcript" id="transcript"></div>
+      </div>
+
+      <!-- Video / result list -->
+      <div class="vlist" id="vlist">
+        <div class="vlist-hdr" id="vlist-hdr"></div>
+        <div id="vlist-items"></div>
+      </div>
+
+      <!-- Conversation history -->
+      <div class="feed" id="feed">
+        <div class="feed-empty" id="feed-empty">No history</div>
+      </div>
+
+      <div class="foot">
+        <span class="foot-clock" id="clock"></span>
+        <button class="foot-btn" id="clr-btn">Clear</button>
+      </div>
+
+      <!-- Always-on listening indicator -->
+      <div class="always-bar">
+        <div class="always-dot"></div>
+        <span class="always-text">Always listening — no wake word</span>
+        <div class="always-dot"></div>
+      </div>
+
+    </div><!-- /hud -->
+  </div><!-- /root -->
+
+  <script src="app.js"></script>
+</body>
+</html>

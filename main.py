@@ -1,5 +1,6 @@
 import re
 import time
+import threading
 from core.listener import Listener
 from core.transcriber import Transcriber
 import core.dispatcher as _dispatcher_mod
@@ -116,7 +117,12 @@ def main():
                 display.hide()
 
     _start_hot_reload()
-    listener.run(on_wake=on_wake, on_command=on_command)
+    threading.Thread(
+        target=listener.run,
+        kwargs={'on_wake': on_wake, 'on_command': on_command},
+        daemon=True,
+    ).start()
+    display.run_loop()
 
 
 if __name__ == "__main__":

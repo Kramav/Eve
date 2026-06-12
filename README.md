@@ -30,7 +30,18 @@ yt-dlp --version
 pip install -r requirements.txt
 ```
 
-### 2. Install mpv
+### 2. Download wake word models
+
+```
+python -c "import openwakeword; openwakeword.utils.download_models()"
+```
+
+This downloads the pre-trained wake word models (including `hey_jarvis`) into the openwakeword package directory. Only needs to be done once.
+
+**Optional — train a custom "Hey Eve" wake word:**
+openwakeword supports training custom wake words. To use "Hey Eve" instead of "Hey Jarvis", follow the [openwakeword training guide](https://github.com/dscripka/openWakeWord/blob/main/docs/training.md) to generate a `.onnx` model, then update `WAKE_WORD` in `config.py` to match your model's filename (without the `.onnx` extension).
+
+### 3. Install mpv
 
 **Easiest — one command (Windows 10/11 built-in package manager):**
 
@@ -49,7 +60,7 @@ $old = [Environment]::GetEnvironmentVariable("PATH", "User")
 
 Restart your terminal, then verify: `mpv --version`
 
-### 3. Install yt-dlp
+### 4. Install yt-dlp
 
 ```
 pip install yt-dlp
@@ -57,7 +68,7 @@ pip install yt-dlp
 
 Or download the standalone `yt-dlp.exe` from the [releases page](https://github.com/yt-dlp/yt-dlp/releases) and place it on your PATH.
 
-### 4. Add your apps (optional)
+### 5. Add your apps (optional)
 
 Create `apps.json` in the Eve folder to teach Eve which apps to open. Each entry is `["spoken name", "path or command"]`:
 

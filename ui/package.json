@@ -1,0 +1,12 @@
+{
+  "name": "eve-ui",
+  "version": "1.0.0",
+  "description": "Eve voice assistant UI",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^42.4.0"
+  }
+}
