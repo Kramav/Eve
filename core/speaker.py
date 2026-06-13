@@ -1,7 +1,5 @@
-import io
 import queue
 import threading
-import wave
 
 import numpy as np
 import sounddevice as sd
@@ -19,29 +17,24 @@ class Speaker:
 
     def _worker(self):
         voice = PiperVoice.load(str(TTS_VOICE_MODEL))
-        voice.config.length_scale = 1.0 / TTS_SPEED  # speed lives on config, not synthesize()
+        voice.config.length_scale = 1.0 / TTS_SPEED
         while True:
             text, done = self._q.get()
             try:
                 if text:
                     self.is_speaking.set()
                     try:
-                        buf = io.BytesIO()
-                        with wave.open(buf, 'wb') as wf:
-                            voice.synthesize(text, wf)
-                        buf.seek(0)
-                        with wave.open(buf) as wf:
-                            frames = wf.readframes(wf.getnframes())
-                            rate   = wf.getframerate()
-                        audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
-                        sd.play(audio, rate)
-                        sd.wait()
+                        chunks = list(voice.synthesize(text))
+                        if chunks:
+                            audio = np.concatenate([c.audio_float_array for c in chunks])
+                            sd.play(audio, chunks[0].sample_rate)
+                            sd.wait()
                     except Exception as e:
                         print(f"TTS error: {e}")
                     finally:
                         self.is_speaking.clear()
             finally:
-                done.set()  # always unblock speak() callers even if synthesis fails
+                done.set()
 
     def speak(self, text: str):
         if not self.enabled or not text:
