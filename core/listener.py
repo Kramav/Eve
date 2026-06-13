@@ -1,4 +1,5 @@
 import queue
+import threading
 import sounddevice as sd
 import numpy as np
 from openwakeword.model import Model
@@ -16,6 +17,7 @@ class Listener:
         self._model        = Model(wakeword_models=[WAKE_WORD], inference_framework="onnx")
         self._q:           queue.Queue    = queue.Queue()
         self._is_speaking: threading.Event | None = None
+        self.enabled                              = True
 
     def _callback(self, indata, frames, time_info, status):
         self._q.put(indata.copy())
@@ -24,6 +26,9 @@ class Listener:
         """Wire up the speaker's is_speaking flag so wake-word detection
         is suppressed while TTS is playing (prevents mic feedback loops)."""
         self._is_speaking = event
+
+    def set_enabled(self, enabled: bool) -> None:
+        self.enabled = bool(enabled)
 
     def run(self, on_wake=None, on_command=None):
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16",
@@ -51,6 +56,8 @@ class Listener:
     def _wait_for_wake_word(self):
         while True:
             chunk = self._q.get().flatten()
+            if not self.enabled:
+                continue  # drain mic while disabled; re-enable resumes immediately
             if self._is_speaking and self._is_speaking.is_set():
                 continue  # drain mic while TTS is playing
             if self._model.predict(chunk).get(WAKE_WORD, 0) > 0.5:

@@ -85,25 +85,40 @@ html, body {
   border: 1px solid var(--border);
   border-radius: 20px;
   padding: 3px 10px 3px 8px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.state-pill:hover {
+  background: var(--accent-d);
+  border-color: rgba(74,158,255,0.25);
+}
+body.offline .state-pill:hover {
+  background: rgba(255,80,80,0.08);
+  border-color: rgba(255,80,80,0.25);
 }
 
 .state-dot {
   width: 6px; height: 6px;
   border-radius: 50%;
-  background: var(--dim2);
+  background: var(--green);
+  box-shadow: 0 0 5px rgba(0,232,122,0.45);
   transition: background 0.3s, box-shadow 0.3s;
   flex-shrink: 0;
 }
+.state-dot.idle       { background: var(--green);  box-shadow: 0 0 5px rgba(0,232,122,0.45); }
 .state-dot.listening  { background: var(--accent); box-shadow: 0 0 6px rgba(74,158,255,0.6); }
 .state-dot.processing { background: #ffa040;       box-shadow: 0 0 6px rgba(255,160,64,0.5); }
 .state-dot.playing    { background: var(--green);  box-shadow: 0 0 6px rgba(0,232,122,0.5); }
+.state-dot.offline    { background: var(--red);    box-shadow: 0 0 6px rgba(255,80,80,0.5); }
 
 .state-label {
   font-size: 9px;
   letter-spacing: 2px;
-  color: var(--dim);
+  color: var(--green);
   text-transform: uppercase;
 }
+body.offline .state-label { color: var(--red); }
 
 /* ── Titlebar buttons ─────────────────────────────────────────────────── */
 .expand-btn,
@@ -335,6 +350,11 @@ html, body {
 /* ── Body mode classes ───────────────────────────────────────────────── */
 body.listening  .state-label { color: var(--accent); }
 body.processing .state-label { color: #ffa040; }
+body.offline    .state-label { color: var(--red); }
+body.offline    .titlebar-dot {
+  background: var(--red);
+  box-shadow: 0 0 6px rgba(255,80,80,0.5);
+}
 body.always-on  .titlebar-dot {
   background: var(--always);
   box-shadow: 0 0 6px rgba(255, 51, 85, 0.6);

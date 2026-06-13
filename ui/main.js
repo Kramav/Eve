@@ -9,6 +9,7 @@ let orbWin           = null
 let dirWin           = null
 let appManagerWin    = null
 let windowManagerWin = null
+let voiceSettingsWin = null
 let tray             = null
 let _savedDirBounds  = null
 
@@ -88,9 +89,20 @@ function createOrbWin() {
     focusable: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
+  // 'screen-saver' is the highest standard z-level — beats borderless fullscreen games.
+  // visibleOnFullScreen ensures the orb stays drawn when another window goes fullscreen.
+  orbWin.setAlwaysOnTop(true, 'screen-saver', 1)
+  orbWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   orbWin.loadFile(path.join(__dirname, 'src', 'index.html'))
   positionOrb()
   orbWin.on('close', e => { if (!app.isQuitting) e.preventDefault() })
+  // Windows demotes topmost flags when a fullscreen app takes focus.
+  // Re-assert every 2s so the orb stays above borderless fullscreen games.
+  setInterval(() => {
+    if (orbWin && !orbWin.isDestroyed()) {
+      orbWin.setAlwaysOnTop(true, 'screen-saver', 1)
+    }
+  }, 2000)
 }
 
 // ── Directory window ──────────────────────────────────────────────────────────
@@ -102,12 +114,22 @@ function createDirWin() {
     alwaysOnTop: true, skipTaskbar: true, resizable: false, show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
+  dirWin.setAlwaysOnTop(true, 'screen-saver', 1)
+  dirWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   dirWin.loadFile(path.join(__dirname, 'src', 'directory', 'index.html'))
   dirWin._ready = false
   dirWin.once('ready-to-show', () => { dirWin._ready = true })
   dirWin.on('close', e => {
     if (!app.isQuitting) { e.preventDefault(); hideDirectory() }
   })
+  // Same periodic re-assert as the orb. Windows clears topmost flags on hidden
+  // windows when a fullscreen app takes focus; this keeps the flag alive so
+  // show() pops above the game instead of behind it.
+  setInterval(() => {
+    if (dirWin && !dirWin.isDestroyed()) {
+      dirWin.setAlwaysOnTop(true, 'screen-saver', 1)
+    }
+  }, 2000)
 }
 
 function showDirectory() {
@@ -116,12 +138,19 @@ function showDirectory() {
   _savedDirBounds  = null
   const { x, y, width } = getOrbDisplay().bounds
   dirWin.setBounds({ x: x + width - 700 - 10, y: y + 116, width: 700, height: 520 })
-  if (dirWin._ready) {
+  const present = () => {
+    // Pre-assert topmost so the OS orders the window above the fullscreen app
+    // at the moment show() takes effect, not after.
+    dirWin.setAlwaysOnTop(true, 'screen-saver', 1)
     dirWin.show()
+    // Re-assert after — Windows sometimes processes the show() event before
+    // applying the new z-order; this catches that race.
+    dirWin.setAlwaysOnTop(true, 'screen-saver', 1)
+    dirWin.moveTop()
     dirWin.focus()
-  } else {
-    dirWin.once('ready-to-show', () => { dirWin.show(); dirWin.focus() })
   }
+  if (dirWin._ready) present()
+  else                dirWin.once('ready-to-show', present)
 }
 
 function hideDirectory() {
@@ -238,6 +267,52 @@ function openWindowManager() {
 ipcMain.on('open-window-manager',  openWindowManager)
 ipcMain.on('close-window-manager', () => {
   if (windowManagerWin && !windowManagerWin.isDestroyed()) windowManagerWin.close()
+})
+
+function openVoiceSettings() {
+  if (voiceSettingsWin && !voiceSettingsWin.isDestroyed()) { voiceSettingsWin.focus(); return }
+  voiceSettingsWin = new BrowserWindow({
+    width: 500, height: 540, minWidth: 420, minHeight: 460,
+    title: 'Eve — Voice Settings', backgroundColor: '#080e18', frame: true, resizable: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+  })
+  voiceSettingsWin.setMenuBarVisibility(false)
+  voiceSettingsWin.loadFile(path.join(__dirname, 'src', 'voice-settings', 'index.html'))
+  voiceSettingsWin.on('closed', () => { voiceSettingsWin = null })
+}
+
+ipcMain.on('open-voice-settings',  openVoiceSettings)
+ipcMain.on('close-voice-settings', () => {
+  if (voiceSettingsWin && !voiceSettingsWin.isDestroyed()) voiceSettingsWin.close()
+})
+
+ipcMain.handle('get-voice-settings', () => {
+  let s = {}
+  try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) } catch {}
+  return s.voice || { speed: 1.0, noise_scale: 0.667, noise_w: 0.8 }
+})
+
+ipcMain.handle('get-voice-presets', () => {
+  let s = {}
+  try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) } catch {}
+  return s.voice_presets || {}
+})
+
+ipcMain.handle('save-voice-preset', (_, { name, params }) => {
+  let s = {}
+  try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) } catch {}
+  if (!s.voice_presets) s.voice_presets = {}
+  s.voice_presets[name] = params
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2))
+  return s.voice_presets
+})
+
+ipcMain.handle('delete-voice-preset', (_, { name }) => {
+  let s = {}
+  try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) } catch {}
+  if (s.voice_presets) delete s.voice_presets[name]
+  fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2))
+  return s.voice_presets || {}
 })
 
 function broadcastDisplayChange() {

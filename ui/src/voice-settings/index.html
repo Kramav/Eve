@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:7734">
+  <title>Eve — Voice Settings</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="titlebar">
+    <span class="titlebar-title">VOICE SETTINGS</span>
+    <span class="titlebar-sub">Tune TTS voice parameters</span>
+  </div>
+
+  <div class="params">
+
+    <div class="param-row">
+      <div class="param-hdr">
+        <span class="param-label">VOICE</span>
+        <span class="param-val" id="voice-count">—</span>
+      </div>
+      <div class="slider-row">
+        <select class="voice-select" id="voice_id">
+          <option value="">Loading…</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="param-row">
+      <div class="param-hdr">
+        <span class="param-label">SPEED</span>
+        <span class="param-val" id="speed-val">1.00×</span>
+      </div>
+      <div class="slider-row">
+        <span class="track-end">Slower</span>
+        <input type="range" class="slider" id="speed" min="0.5" max="2.0" step="0.05" value="1.0">
+        <span class="track-end">Faster</span>
+      </div>
+    </div>
+
+    <div class="param-row">
+      <div class="param-hdr">
+        <span class="param-label">EXPRESSIVENESS</span>
+        <span class="param-val" id="noise_scale-val">0.67</span>
+      </div>
+      <div class="slider-row">
+        <span class="track-end">Flat</span>
+        <input type="range" class="slider" id="noise_scale" min="0.0" max="1.0" step="0.01" value="0.667">
+        <span class="track-end">Expressive</span>
+      </div>
+    </div>
+
+    <div class="param-row">
+      <div class="param-hdr">
+        <span class="param-label">PITCH VARIATION</span>
+        <span class="param-val" id="noise_w-val">0.80</span>
+      </div>
+      <div class="slider-row">
+        <span class="track-end">Monotone</span>
+        <input type="range" class="slider" id="noise_w" min="0.0" max="1.0" step="0.01" value="0.8">
+        <span class="track-end">Varied</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="preset-section">
+    <div class="preset-hdr">
+      <span class="preset-section-label">PRESETS</span>
+      <div class="preset-save-row">
+        <input type="text" class="preset-input" id="preset-name" placeholder="Name…" maxlength="20" spellcheck="false">
+        <button class="preset-save-btn" id="preset-save-btn">Save Preset</button>
+      </div>
+    </div>
+    <div class="preset-chips" id="preset-chips">
+      <span class="preset-empty" id="preset-empty">No presets saved</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    <span class="status-msg" id="status-msg"></span>
+    <div class="footer-btns">
+      <button class="defaults-btn" id="defaults-btn">Defaults</button>
+      <button class="test-btn"     id="test-btn">▶  Test Voice</button>
+      <button class="save-btn"     id="save-btn">Save</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

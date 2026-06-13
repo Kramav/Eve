@@ -2,7 +2,8 @@
 const MODULES = [
   { id: 'app-manager',    label: 'App Manager',    icon: '⬡', action: () => window.eve.openAppManager()    },
   { id: 'window-manager', label: 'Window Manager', icon: '⬢', action: () => window.eve.openWindowManager() },
-  { id: 'commands',       label: 'Commands',       icon: '⌨', action: () => send('open_command_editor')    },
+  { id: 'commands',       label: 'Command Editor',       icon: '⌨', action: () => send('open_command_editor')    },
+  { id: 'voice-settings', label: 'Voice Settings',          icon: '◈', action: () => window.eve.openVoiceSettings() },
 ]
 
 function renderModules() {
@@ -61,17 +62,23 @@ const KIND = { heard: 'You', action: 'Eve', error: 'Error', system: 'Sys' }
 let entryCount = 0, prev = {}
 
 function applyState(s) {
-  const mode = s.mode || 'idle'
-  const cls  = []
+  const mode    = s.mode || 'idle'
+  const enabled = s.listener_enabled !== false   // default true
+  const cls     = []
+  if (!enabled)              cls.push('offline')
   if (mode === 'listening')  cls.push('listening')
   if (mode === 'processing') cls.push('processing')
   if (s.active_listening)    cls.push('always-on')
   document.body.className = cls.join(' ')
 
-  if (mode !== prev.mode || s.status_text !== prev.status_text) {
-    const labels = { idle: 'Idle', listening: 'Listening', processing: 'Thinking', playing: 'Playing' }
-    document.getElementById('state-dot').className   = `state-dot ${mode}`
-    document.getElementById('state-label').textContent = s.status_text || labels[mode] || 'Idle'
+  if (mode !== prev.mode || s.status_text !== prev.status_text || enabled !== prev.enabled) {
+    const labels   = { idle: 'Online', listening: 'Listening', processing: 'Thinking', playing: 'Playing' }
+    const dotMode  = enabled ? mode : 'offline'
+    const labelTxt = enabled ? (s.status_text || labels[mode] || 'Online') : 'Offline'
+    document.getElementById('state-dot').className     = `state-dot ${dotMode}`
+    document.getElementById('state-label').textContent = labelTxt
+    const pill = document.getElementById('state-pill')
+    if (pill) pill.title = enabled ? 'Click to disable listening' : 'Click to enable listening'
   }
 
   const st = document.getElementById('status-text')
@@ -107,7 +114,7 @@ function applyState(s) {
     prev.listKey = listKey
   }
 
-  prev = { mode: s.mode, status_text: s.status_text, main_text: s.main_text, listKey: prev.listKey }
+  prev = { mode: s.mode, status_text: s.status_text, main_text: s.main_text, listKey: prev.listKey, enabled: enabled }
 }
 
 function appendEntry(e) {
@@ -148,4 +155,8 @@ if (window.eve.onDirectorySizeChanged) {
 document.getElementById('close-btn').addEventListener('click', () => {
   send('directory_closed')
   window.eve.hideDirectory()
+})
+
+document.getElementById('state-pill').addEventListener('click', () => {
+  send('toggle_listener')
 })

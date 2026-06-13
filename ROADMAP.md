@@ -15,16 +15,39 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
   Python: `core/window_manager.py` already has `enumerate_windows()` as the foundation.
 - **Identify Monitors** - display numbers on each monitor for UX. This should streamline the Window Manager process.  Window manager should be configurable with voice commands. "Set monitor one to 2x2 grid"  "Name monitor 2 Primary display" "Set HUD display to primary display"  "Move hud to monitor three" "Move hud window 1 top-left"
 
+### Voice / UI Commands
+- **Fix routing directory voice commands** — "open directory" / "close directory" not reliably
+  triggering show/hide. Audit `_OPEN_DIRECTORY` regex in `main.py` and the `toggle_overlay()`
+  path in `core/display.py`; ensure open and close are separate intents, not a single toggle.
+- **Voice labels must match UI labels** — rule: any string visible on a tile or button must work
+  as a spoken command (with or without "open"). Enforce by keeping `MODULES` labels in sync with
+  the regex patterns in `main.py` whenever either side changes.
+
 ### Dialogue
 - **Converse pattern** — generalize `core/session.py` beyond YouTube/Playing mode so any command
   handler can claim follow-up utterances. Example: "set timer 5 minutes" → "cancel it" should route
   back to the timer handler without re-matching. Pattern modeled on OVOS ConverseService.
 
+### UI / UX
+- **Command Editor inline UI** — replace the current external editor (`open_editor()` opens a file
+  in Notepad/VS Code) with a first-class BrowserWindow panel styled to match App Manager and
+  Window Manager. Inline editor with syntax highlighting for the custom commands JSON/YAML,
+  save button, live reload on save. Lives in `ui/src/command-editor/`.
+
+### Change TTS Tone
+- **Tone is bad** - I hate the default Piper-TTS voice
 ---
 
 ## P2 — Medium Priority
 
 ### Voice Understanding
+- **Near-miss intent suggestion** — when a phrase doesn't match any intent but is close to a
+  known command label or panel name, speak a confirmation prompt instead of "not recognized."
+  Example: "voice manager" → "Did you mean voice settings?" User says "yes" / "no" to confirm.
+  Different from prefix-retry (which guesses the command) — this guesses the *meaning* using
+  fuzzy string similarity (`rapidfuzz.fuzz.partial_ratio`) against a flat list of labeled intents
+  and UI panel names. Requires the converse pattern (P1) to handle the yes/no follow-up.
+  Lives in `core/dispatcher.py` as a third-pass after prefix-retry, before Silent fallback.
 - **Padatious-style intent matching** — add an example-based intent layer alongside regex.
   Write phrase examples instead of hand-tuned patterns; handles natural paraphrasing.
   Could use `padatious` pip package or `rapidfuzz` for lightweight fuzzy matching.

@@ -14,10 +14,13 @@ import commands.youtube as _yt_cmd
 import commands.system as _sys_cmd
 
 _OVERLAY_TOGGLE = re.compile(
-    # Full phrase: "show/hide/close the overlay / log / history"
-    r"(?:show|open|hide|close|toggle) (?:the )?(?:overlay|visual overlay|log|activity log|history)"
+    # Full phrase: "show/hide/close the overlay / hud / log / history"
+    # \s+ tolerates non-breaking spaces; (?:\w+\s+){0,2}? swallows filler words
+    # Whisper inserts (e.g. "show an overlay", "show me the hud").
+    r"\b(?:show|open|hide|close|toggle)\s+(?:\w+\s+){0,2}?(?:overlay|hud|log|history)\b"
     # Bare word or on/off suffix — Whisper often drops the leading verb
-    r"|^overlay(?: on| off)?$"
+    r"|^(?:overlay|hud)(?:\s+(?:on|off))?$",
+    re.I,
 )
 
 _MANAGE_APPS = re.compile(
@@ -31,6 +34,27 @@ _MANAGE_WINDOWS = re.compile(
     re.I,
 )
 
+_OPEN_DIRECTORY = re.compile(
+    r"\b(?:show|open|launch)\s+(?:the\s+)?(?:routing\s+)?directory\b",
+    re.I,
+)
+
+_CLOSE_DIRECTORY = re.compile(
+    r"\b(?:close|hide|dismiss)\s+(?:the\s+)?(?:routing\s+)?directory\b",
+    re.I,
+)
+
+_VOICE_SETTINGS = re.compile(
+    r"\b(?:open|show|launch)\s+(?:the\s+)?voice\s+(?:settings?|config(?:uration)?|options?|manager)\b"
+    r"|\bvoice\s+(?:settings?|manager)\b",
+    re.I,
+)
+
+_COMMAND_EDITOR = re.compile(
+    r"\b(?:open|show|edit|launch)\s+(?:the\s+)?command(?:s|\s+editor)\b",
+    re.I,
+)
+
 
 def main():
     print("Starting Eve...")
@@ -39,6 +63,9 @@ def main():
     speaker = Speaker()
     transcriber = Transcriber()
     listener = Listener()
+
+    display.set_speaker(speaker)
+    display.set_listener(listener)
 
     _yt_cmd.set_display(display)
     _sys_cmd.set_display(display)
@@ -89,6 +116,16 @@ def main():
                 delay = 0
                 return
 
+            if _OPEN_DIRECTORY.search(text):
+                display.show_directory()
+                delay = 0
+                return
+
+            if _CLOSE_DIRECTORY.search(text):
+                display.hide_directory()
+                delay = 0
+                return
+
             if _MANAGE_APPS.search(text):
                 display.open_app_manager()
                 delay = 0
@@ -96,6 +133,17 @@ def main():
 
             if _MANAGE_WINDOWS.search(text):
                 display.open_window_manager()
+                delay = 0
+                return
+
+            if _VOICE_SETTINGS.search(text):
+                display.open_voice_settings()
+                delay = 0
+                return
+
+            if _COMMAND_EDITOR.search(text):
+                from commands.system import open_editor
+                open_editor()
                 delay = 0
                 return
 

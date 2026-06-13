@@ -14,6 +14,8 @@ function connect() {
       else if (msg.type === 'close_app_manager')    window.eve.closeAppManager()
       else if (msg.type === 'open_window_manager')  window.eve.openWindowManager()
       else if (msg.type === 'close_window_manager') window.eve.closeWindowManager()
+      else if (msg.type === 'open_voice_settings')  window.eve.openVoiceSettings()
+      else if (msg.type === 'close_voice_settings') window.eve.closeVoiceSettings()
     } catch (_) {}
   }
   ws.onclose = () => setTimeout(connect, 500)
@@ -33,15 +35,19 @@ const MODE_COLORS = {
   processing: [0,   212, 255],
   playing:    [0,   232, 122],
 }
-const ALWAYS_RGB = [255, 51, 85]
+const ALWAYS_RGB  = [255, 51, 85]
+const OFFLINE_RGB = [120, 30, 40]
 
 let evMode     = 'idle'
 let evAlwaysOn = false
+let evEnabled  = true
 
 function orbColor(alpha) {
-  const [r, g, b] = (evAlwaysOn && evMode === 'idle')
-    ? ALWAYS_RGB
-    : (MODE_COLORS[evMode] || MODE_COLORS.idle)
+  let rgb
+  if (!evEnabled)                              rgb = OFFLINE_RGB
+  else if (evAlwaysOn && evMode === 'idle')    rgb = ALWAYS_RGB
+  else                                         rgb = MODE_COLORS[evMode] || MODE_COLORS.idle
+  const [r, g, b] = rgb
   return alpha === undefined
     ? `rgb(${r},${g},${b})`
     : `rgba(${r},${g},${b},${alpha})`
@@ -49,7 +55,7 @@ function orbColor(alpha) {
 
 function drawOrb(ts) {
   const t        = ts * 0.001
-  const isActive = evMode === 'listening' || evAlwaysOn
+  const isActive = evEnabled && (evMode === 'listening' || evAlwaysOn)
   const pulse    = (Math.sin(t * (isActive ? 4.5 : 1.6)) + 1) / 2
 
   ctx.clearRect(0, 0, W, H)
@@ -108,7 +114,7 @@ function drawOrb(ts) {
   ctx.fill(); ctx.shadowBlur = 0
 
   // Waveform bars inside orb when active
-  if (evMode === 'listening' || evAlwaysOn) {
+  if (evEnabled && (evMode === 'listening' || evAlwaysOn)) {
     const n = 7, bw = 2.5, gap = 2
     const sx = CX - (n * (bw + gap) - gap) / 2
     for (let i = 0; i < n; i++) {
@@ -163,7 +169,11 @@ requestAnimationFrame(drawOrb)
 function applyState(s) {
   evMode     = s.mode || 'idle'
   evAlwaysOn = !!s.active_listening
-  document.body.className = evAlwaysOn ? 'always-on' : ''
+  evEnabled  = s.listener_enabled !== false
+  const cls  = []
+  if (!evEnabled) cls.push('offline')
+  if (evAlwaysOn) cls.push('always-on')
+  document.body.className = cls.join(' ')
 }
 
 // ── Orb click opens directory ─────────────────────────────────────────────────

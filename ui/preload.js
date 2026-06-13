@@ -17,6 +17,13 @@ contextBridge.exposeInMainWorld('eve', {
   onDisplaysChanged:      (cb) => ipcRenderer.on('displays-changed',       cb),
   onDirectorySizeChanged: (cb) => ipcRenderer.on('directory-size-changed', cb),
 
+  openVoiceSettings:   () => ipcRenderer.send('open-voice-settings'),
+  closeVoiceSettings:  () => ipcRenderer.send('close-voice-settings'),
+  getVoiceSettings:    () => ipcRenderer.invoke('get-voice-settings'),
+  getVoicePresets:     () => ipcRenderer.invoke('get-voice-presets'),
+  saveVoicePreset:     (name, params) => ipcRenderer.invoke('save-voice-preset', { name, params }),
+  deleteVoicePreset:   (name)         => ipcRenderer.invoke('delete-voice-preset', { name }),
+
   getTilingLayouts:  ()                       => ipcRenderer.invoke('get-tiling-layouts'),
   setTilingLayout:   (monitorId, monitorData) => ipcRenderer.invoke('set-tiling-layout', { monitorId, monitorData }),
 })

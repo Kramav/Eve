@@ -5,10 +5,10 @@ WHISPER_MODEL = "small.en"  # tiny.en (fastest) / base.en / small.en (most accur
 SILENCE_THRESHOLD = 800    # mic amplitude to consider silence (0–32768); raise if recording runs long
 SILENCE_DURATION_S = 1.5   # seconds of silence to stop recording
 
-# Piper TTS — place model files in the models/ folder at the project root.
-# Download: en_US-lessac-medium.onnx + en_US-lessac-medium.onnx.json (~63 MB)
-# Other voices: https://huggingface.co/rhasspy/piper-voices
-TTS_VOICE_MODEL = Path(__file__).parent / "models" / "en_US-lessac-medium.onnx"
-TTS_SPEED       = 1.0   # speech rate: 1.0 = normal, 0.8 = slower, 1.2 = faster
+# Piper TTS — drop .onnx + .onnx.json pairs into models/voices/ (any number).
+# Download voices: https://huggingface.co/rhasspy/piper-voices
+TTS_VOICES_DIR    = Path(__file__).parent / "models" / "voices"
+TTS_DEFAULT_VOICE = "en_US-lessac-medium"   # filename stem (without .onnx)
+TTS_SPEED         = 1.0   # speech rate: 1.0 = normal, 0.8 = slower, 1.2 = faster
 
 # Custom commands are managed via editor.py — no need to edit here.

@@ -21,22 +21,30 @@ from pathlib import Path
 # All messages include a "type" field so multiple windows (overlay, app manager)
 # can filter for the messages they care about.
 
-WS_PORT   = 7734
-APPS_FILE = Path(__file__).parent.parent / 'apps.json'
+WS_PORT        = 7734
+APPS_FILE      = Path(__file__).parent.parent / 'apps.json'
+SETTINGS_FILE  = Path(__file__).parent.parent / 'settings.json'
+
+_VOICE_DEFAULTS = {'speed': 1.0, 'noise_scale': 0.667, 'noise_w': 0.8}
+_VOICE_KEYS     = ('speed', 'noise_scale', 'noise_w', 'voice_id')
 
 
 class Display:
     def __init__(self):
-        self._lock    = threading.Lock()
-        self._state   = {
+        self._speaker  = None
+        self._listener = None
+        self._lock     = threading.Lock()
+        self._state    = {
             'mode':             'idle',
             'hud_visible':      False,
             'active_listening': False,
+            'listener_enabled': True,
             'status_text':      '',
             'main_text':        '',
             'log_entries':      [],
             'list_items':       [],
             'list_status':      '',
+            'voice_params':     self._load_voice_settings(),
         }
         self._clients          = set()
         self._last_scan_payload = None
@@ -99,6 +107,38 @@ class Display:
             asyncio.ensure_future(self._do_scan())
         elif action == 'save_apps':
             await self._save_apps_async(data.get('apps', []), ws)
+        elif action == 'set_voice_settings':
+            params = self._clean_voice_params(data.get('params', {}))
+            self._save_voice_settings(params)
+            with self._lock:
+                self._state['voice_params'] = params
+            if self._speaker:
+                loop = asyncio.get_running_loop()
+                asyncio.ensure_future(loop.run_in_executor(
+                    None, lambda: self._speaker.update_params(**params)
+                ))
+        elif action == 'test_voice':
+            loop = asyncio.get_running_loop()
+            params = self._clean_voice_params(data.get('params') or {})
+            if params and self._speaker:
+                await loop.run_in_executor(None, lambda: self._speaker.update_params(**params))
+            if self._speaker:
+                asyncio.ensure_future(loop.run_in_executor(
+                    None, self._speaker.speak, "Testing voice settings. How does this sound?"
+                ))
+        elif action == 'set_listener_enabled':
+            self.set_listener_enabled(bool(data.get('enabled', True)))
+        elif action == 'toggle_listener':
+            with self._lock:
+                cur = self._state['listener_enabled']
+            self.set_listener_enabled(not cur)
+        elif action == 'get_voices':
+            from core.speaker import list_voices
+            await self._push_one(ws, json.dumps({
+                'type':    'voices_list',
+                'voices':  list_voices(),
+                'current': self._speaker.current_voice_id if self._speaker else None,
+            }))
 
     def _broadcast(self):
         payload = self._snapshot()
@@ -147,6 +187,66 @@ class Display:
             result = {'type': 'save_result', 'success': False, 'error': str(e)}
         await self._push_one(ws, json.dumps(result))
 
+    def set_listener(self, listener):
+        self._listener = listener
+        try:
+            listener.set_enabled(self._state['listener_enabled'])
+        except Exception as e:
+            print(f"Error syncing listener state: {e}")
+
+    def set_listener_enabled(self, enabled: bool):
+        with self._lock:
+            self._state['listener_enabled'] = bool(enabled)
+        if self._listener:
+            try:
+                self._listener.set_enabled(bool(enabled))
+            except Exception as e:
+                print(f"Error toggling listener: {e}")
+        self._broadcast()
+
+    def set_speaker(self, speaker):
+        self._speaker = speaker
+        # apply persisted voice/params to the freshly-started speaker
+        saved = self._state.get('voice_params') or {}
+        params = self._clean_voice_params(saved)
+        if params:
+            try:
+                speaker.update_params(**params)
+            except Exception as e:
+                print(f"Error applying saved voice params: {e}")
+
+    def _clean_voice_params(self, raw: dict) -> dict:
+        out = {}
+        for k in _VOICE_KEYS:
+            if k not in raw:
+                continue
+            v = raw[k]
+            if k == 'voice_id':
+                if v: out[k] = str(v)
+            else:
+                try: out[k] = float(v)
+                except (TypeError, ValueError): pass
+        return out
+
+    def _load_voice_settings(self) -> dict:
+        try:
+            data = json.loads(SETTINGS_FILE.read_text())
+            return {**_VOICE_DEFAULTS, **data.get('voice', {})}
+        except Exception:
+            return dict(_VOICE_DEFAULTS)
+
+    def _save_voice_settings(self, params: dict):
+        try:
+            data = {}
+            try:
+                data = json.loads(SETTINGS_FILE.read_text())
+            except Exception:
+                pass
+            data['voice'] = params
+            SETTINGS_FILE.write_text(json.dumps(data, indent=2))
+        except Exception as e:
+            print(f"Error saving voice settings: {e}")
+
     def _load_apps(self) -> list:
         try:
             return json.loads(APPS_FILE.read_text())
@@ -178,6 +278,10 @@ class Display:
 
     def open_window_manager(self):
         payload = json.dumps({'type': 'open_window_manager'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def open_voice_settings(self):
+        payload = json.dumps({'type': 'open_voice_settings'})
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
 
     def close_app_manager(self):
@@ -236,6 +340,26 @@ class Display:
         directive = 'show_directory' if opening else 'hide_directory'
         asyncio.run_coroutine_threadsafe(
             self._push_all(json.dumps({'type': directive})), self._loop
+        )
+        self._broadcast()
+
+    def show_directory(self):
+        with self._lock:
+            if self._state['hud_visible']:
+                return
+            self._state['hud_visible'] = True
+        asyncio.run_coroutine_threadsafe(
+            self._push_all(json.dumps({'type': 'show_directory'})), self._loop
+        )
+        self._broadcast()
+
+    def hide_directory(self):
+        with self._lock:
+            if not self._state['hud_visible']:
+                return
+            self._state['hud_visible'] = False
+        asyncio.run_coroutine_threadsafe(
+            self._push_all(json.dumps({'type': 'hide_directory'})), self._loop
         )
         self._broadcast()
 
