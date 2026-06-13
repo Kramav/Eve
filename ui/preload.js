@@ -16,4 +16,8 @@ contextBridge.exposeInMainWorld('eve', {
 
   // Display change notifications (Window Manager window subscribes to this)
   onDisplaysChanged: (cb) => ipcRenderer.on('displays-changed', cb),
+
+  // Tiling layouts
+  getTilingLayouts:  ()                       => ipcRenderer.invoke('get-tiling-layouts'),
+  setTilingLayout:   (monitorId, monitorData) => ipcRenderer.invoke('set-tiling-layout', { monitorId, monitorData }),
 })

@@ -3,7 +3,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from commands import apps, system, search, reminders, youtube
+from commands import apps, system, search, reminders, youtube, tiling
 import core.session as _sess_mod
 from core.session import Mode
 
@@ -87,6 +87,9 @@ INTENTS = [
     (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",             youtube.play_query_intent),
     (r"(?:play|watch)\s+(.+)",                                    youtube.play_query_intent),
 
+    # Tiling — before generic apps patterns so "snap/move X to Y" doesn't route to open_app
+    (r"(?:snap|move|send)\s+(.+?)\s+(?:to\s+)?(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$", tiling.snap_app),
+
     # Apps — close is graceful, kill is force-terminate
     (r"(?:open|launch|start|pull up|bring up|fire up|boot up|load up|run|start up)\s+(.+)", apps.open_app),
     (r"(?:close|quit|exit)\s+(.+)",                               apps.close_app),
@@ -107,6 +110,11 @@ INTENTS = [
     (r"set (?:a )?timer for (\d+) minutes?",                    reminders.set_timer),
     (r"(?:what are my reminders|list reminders|any reminders)",  reminders.list_reminders),
     (r"cancel (?:all )?(?:my )?(?:reminders|timers)",           reminders.cancel_all),
+
+    # Voice toggle — before system mute so "mute voice" doesn't hit toggle_mute
+    (r"(?:silence|be quiet|shut up|mute (?:voice|eve|speech)|disable (?:voice|speech|tts))", system.silence_voice),
+    (r"(?:enable|unmute|turn on) (?:voice|speech|tts)",         system.enable_voice),
+    (r"toggle (?:voice|speech|tts)",                            system.toggle_voice),
 
     # Volume / media
     (r"volume up",                                               system.volume_up),

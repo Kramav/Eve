@@ -1,0 +1,28 @@
+{
+  "monitors": {
+    "1486444303": {
+      "label": "CB242Y E",
+      "workX": 2048,
+      "workY": -290,
+      "workWidth": 1080,
+      "workHeight": 1880,
+      "layout": "top-bottom",
+      "zones": [
+        {
+          "name": "top",
+          "x_pct": 0,
+          "y_pct": 0,
+          "w_pct": 1,
+          "h_pct": 0.5
+        },
+        {
+          "name": "bottom",
+          "x_pct": 0,
+          "y_pct": 0.5,
+          "w_pct": 1,
+          "h_pct": 0.5
+        }
+      ]
+    }
+  }
+}

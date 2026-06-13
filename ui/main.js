@@ -6,6 +6,7 @@ const COMPACT  = { w: 96,  h: 96  }
 const EXPANDED = { w: 380, h: 620 }
 
 const SETTINGS_FILE = path.join(__dirname, '..', 'settings.json')
+const TILING_FILE   = path.join(__dirname, '..', 'tiling_layouts.json')
 
 let win              = null
 let appManagerWin    = null
@@ -90,6 +91,24 @@ ipcMain.on('set-overlay-display', (_, { displayId }) => {
   }
 })
 
+// ── Tiling layouts ─────────────────────────────────────────────────────────
+
+ipcMain.handle('get-tiling-layouts', () => {
+  try   { return JSON.parse(fs.readFileSync(TILING_FILE, 'utf8')) }
+  catch { return { monitors: {} } }
+})
+
+ipcMain.handle('set-tiling-layout', (_, { monitorId, monitorData }) => {
+  let layouts = { monitors: {} }
+  try { layouts = JSON.parse(fs.readFileSync(TILING_FILE, 'utf8')) } catch {}
+  if (!layouts.monitors) layouts.monitors = {}
+  layouts.monitors[String(monitorId)] = monitorData
+  try {
+    fs.writeFileSync(TILING_FILE, JSON.stringify(layouts, null, 2))
+    return { success: true }
+  } catch (e) { return { success: false, error: e.message } }
+})
+
 // Return all displays with full metadata for UI consumers
 ipcMain.handle('get-displays', () => {
   const primary              = screen.getPrimaryDisplay()
@@ -167,9 +186,9 @@ function openWindowManager() {
 
   windowManagerWin = new BrowserWindow({
     width:           860,
-    height:          560,
+    height:          680,
     minWidth:        640,
-    minHeight:       440,
+    minHeight:       520,
     title:           'Eve — Window Manager',
     backgroundColor: '#080e18',
     frame:           true,

@@ -86,11 +86,41 @@ def cancel_shutdown() -> str:
 
 
 _display = None
+_speaker = None
 
 
 def set_display(display) -> None:
     global _display
     _display = display
+
+
+def set_speaker(speaker) -> None:
+    global _speaker
+    _speaker = speaker
+
+
+def silence_voice() -> str:
+    if _speaker is not None:
+        _speaker.speak("Going silent. Say enable voice to turn me back on.")
+        _speaker.enabled = False
+    return ""  # already spoken above; suppress the main.py speak() call
+
+
+def enable_voice() -> str:
+    if _speaker is not None:
+        _speaker.enabled = True
+    return "Voice enabled"
+
+
+def toggle_voice() -> str:
+    if _speaker is None:
+        return "Voice toggle unavailable"
+    if _speaker.enabled:
+        _speaker.speak("Going silent. Say enable voice to turn me back on.")
+        _speaker.enabled = False
+        return ""
+    _speaker.enabled = True
+    return "Voice enabled"
 
 
 def open_app_manager() -> str:

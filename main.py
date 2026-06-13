@@ -42,6 +42,7 @@ def main():
 
     _yt_cmd.set_display(display)
     _sys_cmd.set_display(display)
+    _sys_cmd.set_speaker(speaker)
 
     listener.set_speaking_event(speaker.is_speaking)
 

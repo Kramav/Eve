@@ -117,14 +117,10 @@ def move_new_window(before: frozenset, target, timeout: float = 8.0):
                 wh = r.bottom - r.top
                 nx = mx + max(0, (mw - ww) // 2)
                 ny = my + max(0, (mh - wh) // 2)
-                _u32.ShowWindow(hwnd, 4)  # SW_SHOWNOACTIVATE — restore if minimised
+                _u32.ShowWindow(hwnd, 4)   # SW_SHOWNOACTIVATE — restore if minimised
                 _u32.SetWindowPos(
                     hwnd, HWND_BOTTOM, nx, ny, 0, 0,
                     SWP_NOSIZE | SWP_NOACTIVATE,
                 )
-            else:
-                _u32.SetWindowPos(
-                    hwnd, HWND_BOTTOM, 0, 0, 0, 0,
-                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
-                )
+            _u32.ShowWindow(hwnd, 3)       # SW_MAXIMIZE — fill monitor regardless of saved state
         return
