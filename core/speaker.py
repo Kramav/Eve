@@ -6,7 +6,8 @@ from config import TTS_RATE
 
 class Speaker:
     def __init__(self):
-        self._q: queue.Queue = queue.Queue()
+        self._q:          queue.Queue    = queue.Queue()
+        self.is_speaking: threading.Event = threading.Event()
         threading.Thread(target=self._worker, daemon=True).start()
 
     def _worker(self):
@@ -19,8 +20,10 @@ class Speaker:
         while True:
             text, done = self._q.get()
             if text:
+                self.is_speaking.set()
                 engine.say(text)
                 engine.runAndWait()
+                self.is_speaking.clear()
             done.set()
 
     def speak(self, text: str):

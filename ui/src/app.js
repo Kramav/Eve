@@ -7,8 +7,11 @@ function connect() {
   ws.onmessage = e => {
     try {
       const msg = JSON.parse(e.data)
-      if (msg.type === 'state')            applyState(msg)
-      else if (msg.type === 'open_app_manager') window.eve.openAppManager()
+      if (msg.type === 'state')                  applyState(msg)
+      else if (msg.type === 'open_app_manager')  window.eve.openAppManager()
+      else if (msg.type === 'open_window_manager')  window.eve.openWindowManager()
+      else if (msg.type === 'close_app_manager')    window.eve.closeAppManager()
+      else if (msg.type === 'close_window_manager') window.eve.closeWindowManager()
     } catch (_) {}
   }
   ws.onclose = () => setTimeout(connect, 500)

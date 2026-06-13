@@ -263,3 +263,54 @@ function addManual() {
 }
 
 document.getElementById('search').addEventListener('input', renderDiscovered)
+
+// ── Display picker ─────────────────────────────────────────────────────────
+async function loadDisplays() {
+  if (!window.eve) return
+  try {
+    const displays = await window.eve.getDisplays()
+    renderDisplays(displays)
+  } catch (_) {}
+}
+
+function renderDisplays(displays) {
+  const list = document.getElementById('display-list')
+  list.innerHTML = ''
+  for (const d of displays) {
+    const btn = document.createElement('button')
+    btn.className = `display-btn${d.isPinned ? ' pinned' : ''}`
+    btn.title = `Pin overlay to ${d.label}`
+
+    const idx = document.createElement('span')
+    idx.className = 'display-btn-index'
+    idx.textContent = d.index
+
+    const name = document.createElement('span')
+    name.textContent = d.label
+
+    const res = document.createElement('span')
+    res.className = 'display-btn-res'
+    res.textContent = `${d.width}×${d.height}`
+
+    btn.append(idx, name, res)
+
+    if (d.isPrimary) {
+      const badge = document.createElement('span')
+      badge.className = 'display-btn-badge'
+      badge.textContent = 'PRIMARY'
+      btn.appendChild(badge)
+    }
+
+    btn.addEventListener('click', async () => {
+      window.eve.setOverlayDisplay(d.id)
+      // Optimistically update pinned state
+      list.querySelectorAll('.display-btn').forEach(b => b.classList.remove('pinned'))
+      btn.classList.add('pinned')
+      setStatus(`Overlay pinned to ${d.label}`, 'ok')
+    })
+
+    list.appendChild(btn)
+  }
+}
+
+loadDisplays()

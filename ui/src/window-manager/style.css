@@ -1,0 +1,217 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:       #080e18;
+  --surface:  #0c1420;
+  --surface2: #101a28;
+  --border:   rgba(74, 158, 255, 0.10);
+  --accent:   #4a9eff;
+  --accent-d: rgba(74, 158, 255, 0.12);
+  --text:     #c4dff5;
+  --dim:      #3a5878;
+  --dim2:     #243447;
+  --green:    #00e87a;
+  --sep:      rgba(74, 158, 255, 0.07);
+}
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  font-family: 'Consolas', 'Courier New', monospace;
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Title bar ──────────────────────────────────────────────────────── */
+.titlebar {
+  height: 44px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  gap: 14px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+}
+
+.titlebar-title {
+  font-size: 9px;
+  letter-spacing: 5px;
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.titlebar-sub {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--dim);
+}
+
+/* ── Virtual monitor canvas ─────────────────────────────────────────── */
+.vm-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  padding: 24px;
+}
+
+.vm-canvas {
+  position: relative;
+  /* width and height set dynamically by app.js */
+}
+
+.vm-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px;
+}
+
+.placeholder-icon {
+  font-size: 32px;
+  color: var(--dim2);
+  opacity: 0.5;
+}
+
+.placeholder-text {
+  font-size: 10px;
+  letter-spacing: 1px;
+  color: var(--dim);
+}
+
+/* ── Monitor cards ──────────────────────────────────────────────────── */
+.monitor-card {
+  position: absolute;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  overflow: hidden;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.monitor-card:hover {
+  border-color: rgba(74, 158, 255, 0.35);
+  background: rgba(74, 158, 255, 0.06);
+}
+
+.monitor-card.hud-pinned {
+  border-color: var(--green);
+  background: rgba(0, 232, 122, 0.06);
+  box-shadow: 0 0 16px rgba(0, 232, 122, 0.18);
+}
+
+.card-index {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--dim);
+  line-height: 1;
+}
+
+.card-res {
+  font-size: 11px;
+  color: var(--text);
+  letter-spacing: 0.5px;
+}
+
+.card-meta {
+  font-size: 9px;
+  color: var(--dim);
+  letter-spacing: 0.5px;
+}
+
+.card-badge {
+  position: absolute;
+  font-size: 7px;
+  letter-spacing: 1px;
+  padding: 2px 5px;
+  border-radius: 2px;
+  text-transform: uppercase;
+}
+
+.primary-badge {
+  bottom: 6px;
+  right: 6px;
+  background: rgba(74, 158, 255, 0.12);
+  color: var(--accent);
+}
+
+.hud-badge {
+  bottom: 6px;
+  left: 6px;
+  background: rgba(0, 232, 122, 0.15);
+  color: var(--green);
+}
+
+/* ── Info bar ───────────────────────────────────────────────────────── */
+.info-bar {
+  height: 32px;
+  background: var(--surface);
+  border-top: 1px solid var(--sep);
+  border-bottom: 1px solid var(--sep);
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  flex-shrink: 0;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--dim);
+  gap: 24px;
+}
+
+.info-item { display: flex; gap: 6px; }
+.info-label { color: var(--dim2); }
+.info-val   { color: var(--text); }
+
+/* ── Footer ─────────────────────────────────────────────────────────── */
+.footer {
+  height: 46px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 18px;
+  flex-shrink: 0;
+}
+
+.status-msg {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--dim);
+  transition: color 0.3s;
+}
+.status-msg.ok    { color: var(--green); }
+.status-msg.error { color: rgba(255, 80, 80, 0.75); }
+
+.refresh-btn {
+  background: var(--accent-d);
+  border: 1px solid rgba(74, 158, 255, 0.2);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 8px;
+  letter-spacing: 2px;
+  padding: 5px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+  text-transform: uppercase;
+  transition: background 0.2s, border-color 0.2s;
+}
+.refresh-btn:hover { background: rgba(74, 158, 255, 0.18); border-color: rgba(74, 158, 255, 0.35); }

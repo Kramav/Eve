@@ -4,12 +4,26 @@ from datetime import datetime
 from pathlib import Path
 import pyautogui
 
-_EDITOR = Path(__file__).parent.parent / "editor.py"
+_EDITOR      = Path(__file__).parent.parent / "editor.py"
+_editor_proc = None
 
 
 def open_editor() -> str:
-    subprocess.Popen([sys.executable, str(_EDITOR)])
+    global _editor_proc
+    if _editor_proc and _editor_proc.poll() is None:
+        return "Command editor is already open"
+    _editor_proc = subprocess.Popen([sys.executable, str(_EDITOR)])
     return "Opening command editor"
+
+
+def close_editor() -> str:
+    global _editor_proc
+    if _editor_proc and _editor_proc.poll() is None:
+        _editor_proc.terminate()
+        _editor_proc = None
+        return "Command editor closed"
+    _editor_proc = None
+    return "Command editor isn't open"
 
 
 def get_time() -> str:
@@ -69,3 +83,35 @@ def shutdown() -> str:
 def cancel_shutdown() -> str:
     subprocess.run("shutdown /a", shell=True)
     return "Shutdown cancelled"
+
+
+_display = None
+
+
+def set_display(display) -> None:
+    global _display
+    _display = display
+
+
+def open_app_manager() -> str:
+    if _display is not None:
+        _display.open_app_manager()
+    return "Opening app manager"
+
+
+def open_window_manager() -> str:
+    if _display is not None:
+        _display.open_window_manager()
+    return "Opening window manager"
+
+
+def close_app_manager() -> str:
+    if _display is not None:
+        _display.close_app_manager()
+    return "Closing app manager"
+
+
+def close_window_manager() -> str:
+    if _display is not None:
+        _display.close_window_manager()
+    return "Closing window manager"

@@ -7,10 +7,11 @@ import core.dispatcher as _dispatcher_mod
 from core.hot_reload import start as _start_hot_reload
 from core.speaker import Speaker
 from core.display import Display
-from core.response import Silent, VideoList
+from core.response import Silent, VideoList, SiteList
 from core.session import get as _get_session, Mode as _Mode
 from commands.reminders import start_checker
 import commands.youtube as _yt_cmd
+import commands.system as _sys_cmd
 
 _OVERLAY_TOGGLE = re.compile(
     # Full phrase: "show/hide/close the overlay / log / history"
@@ -20,8 +21,13 @@ _OVERLAY_TOGGLE = re.compile(
 )
 
 _MANAGE_APPS = re.compile(
-    r"\b(manage|open|show|edit|configure)\b.{0,20}\bapps?\b"
-    r"|\bapp\s+manager\b",
+    r"\b(?:manage|open|show|edit|configure)\b.{0,20}\bapps?\b"
+    r"|\b(?:open|show|launch)\s+(?:the\s+)?app\s+manager\b",
+    re.I,
+)
+
+_MANAGE_WINDOWS = re.compile(
+    r"\b(?:open|show|launch)\s+(?:the\s+)?window\s*manager\b",
     re.I,
 )
 
@@ -35,6 +41,9 @@ def main():
     listener = Listener()
 
     _yt_cmd.set_display(display)
+    _sys_cmd.set_display(display)
+
+    listener.set_speaking_event(speaker.is_speaking)
 
     def on_reminder(message: str):
         display.show(status="Reminder", text=message, color="listening")
@@ -84,6 +93,11 @@ def main():
                 delay = 0
                 return
 
+            if _MANAGE_WINDOWS.search(text):
+                display.open_window_manager()
+                delay = 0
+                return
+
             response = _dispatcher_mod.dispatch(text)
             print(f"Eve: {response}")
 
@@ -94,7 +108,7 @@ def main():
                 delay = 1.5
                 return
 
-            if isinstance(response, VideoList):
+            if isinstance(response, (VideoList, SiteList)):
                 display.show_list(response.format_items(), status=str(response))
                 display.log("action", str(response))
                 display.set_mode("playing")

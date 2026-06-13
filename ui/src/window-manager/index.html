@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'">
+  <title>Eve — Window Manager</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="titlebar">
+    <span class="titlebar-title">WINDOW MANAGER</span>
+    <span class="titlebar-sub">Configure display layout and HUD placement</span>
+  </div>
+
+  <div class="vm-wrap">
+    <div class="vm-canvas" id="vm-canvas">
+      <div class="vm-placeholder" id="vm-placeholder">
+        <div class="placeholder-icon">⬡</div>
+        <div class="placeholder-text">Loading display configuration…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="info-bar" id="info-bar"></div>
+
+  <div class="footer">
+    <span class="status-msg" id="status-msg"></span>
+    <button class="refresh-btn" id="refresh-btn">Refresh</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -64,16 +64,24 @@ def get_target_monitor():
     return None
 
 
-def snapshot_windows():
-    """Frozenset of visible top-level HWNDs with dimensions > 100 px."""
+def snapshot_windows(min_size: int = 100):
+    """Frozenset of visible top-level HWNDs whose w and h both exceed min_size.
+
+    Pass min_size=0 for the *before* snapshot taken prior to launching an app
+    so that the compact Eve overlay (96×96) is included.  When the overlay later
+    expands it keeps the same HWND and therefore never appears in (after − before).
+    """
     found = set()
 
     def _cb(hwnd, _):
         if _u32.IsWindowVisible(hwnd):
-            r = ctypes.wintypes.RECT()
-            _u32.GetWindowRect(hwnd, ctypes.byref(r))
-            if (r.right - r.left) > 100 and (r.bottom - r.top) > 100:
+            if min_size == 0:
                 found.add(hwnd)
+            else:
+                r = ctypes.wintypes.RECT()
+                _u32.GetWindowRect(hwnd, ctypes.byref(r))
+                if (r.right - r.left) > min_size and (r.bottom - r.top) > min_size:
+                    found.add(hwnd)
         return True
 
     _u32.EnumWindows(_WNDENUMPROC(_cb), 0)

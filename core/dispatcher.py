@@ -62,8 +62,20 @@ def _help() -> str:
 
 # (regex pattern, handler) — first match wins, captured groups passed as args
 INTENTS = [
-    # Command editor — dedicated intent so it isn't mangled by the generic open regex
+    # Command editor
     (r"(?:open|edit|show|launch) (?:the )?(?:command editor|my commands|eve commands|commands)", system.open_editor),
+    (r"(?:close|quit|exit|dismiss) (?:the )?(?:command editor|my commands|eve commands|commands)", system.close_editor),
+    (r"kill (?:the )?(?:command editor|my commands|eve commands|commands)",                        system.close_editor),
+
+    # Window Manager — before generic open/launch to prevent misrouting to open_app
+    (r"(?:open|show|launch) (?:the )?window manager",          system.open_window_manager),
+    (r"(?:close|quit|exit|dismiss) (?:the )?window manager",   system.close_window_manager),
+    (r"kill (?:the )?window manager",                           system.close_window_manager),
+
+    # App Manager
+    (r"(?:open|show|launch) (?:the )?app manager",             system.open_app_manager),
+    (r"(?:close|quit|exit|dismiss) (?:the )?app manager",      system.close_app_manager),
+    (r"kill (?:the )?app manager",                             system.close_app_manager),
 
     # Help
     (r"help|what can (?:you|eve) do|list commands|show commands", _help),
@@ -75,15 +87,16 @@ INTENTS = [
     (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",             youtube.play_query_intent),
     (r"(?:play|watch)\s+(.+)",                                    youtube.play_query_intent),
 
-    # Apps (after YouTube so "open youtube" is caught above)
+    # Apps — close is graceful, kill is force-terminate
     (r"(?:open|launch|start|pull up|bring up|fire up|boot up|load up|run|start up)\s+(.+)", apps.open_app),
-    (r"(?:close|quit|kill|exit)\s+(.+)",                          apps.close_app),
+    (r"(?:close|quit|exit)\s+(.+)",                               apps.close_app),
+    (r"kill\s+(.+)",                                              apps.kill_app),
 
     # Direct navigation
     (r"(?:go to|navigate to|take me to|visit|browse to)\s+(.+)",  search.go_to_site),
 
     # Web search (after YouTube so "search youtube" is caught above)
-    (r"(?:search for|look up|google|search|find)\s+(.+)",         search.web_search),
+    (r"(?:search for|look up|google|search|find)\s+(.+)",         search.web_search_list),
 
     # Date / time
     (r"what(?:'?s| is) (?:the )?time",                          system.get_time),
@@ -118,9 +131,54 @@ _ORDINALS = {
 }
 
 
-def _dispatch_listing(text: str):
-    """Handle commands when a video list is displayed."""
+def _dispatch_site_listing(text: str):
+    """Handle selection commands when a web search result list is displayed."""
     from core.response import Silent
+
+    # "go to 3" / "open 2" / "go to link 3" / "open the 2nd link"
+    m = re.search(
+        r"(?:open|go to|visit|select|choose|pick)\s+"
+        r"(?:the\s+)?(?:link\s+)?(?:number\s+)?(\d+)(?:\s+link)?",
+        text
+    )
+    if m:
+        return search.select_site(int(m.group(1)))
+
+    # "link 3" / "number 3" / bare "3"
+    m = re.search(r"(?:^|(?:link|number)\s+)(\d+)(?:\s+link)?$", text)
+    if m:
+        return search.select_site(int(m.group(1)))
+
+    # ordinals: "first" / "the second one" / "go to the third link"
+    for word, n in _ORDINALS.items():
+        if re.search(rf"\b{word}\b", text):
+            return search.select_site(n)
+
+    if re.search(r"read (?:the list|them|it|those)|read (?:it )?(?:again|back)", text):
+        return search.read_site_list()
+
+    # domain/title keyword: "open the wikipedia one" / "go to reddit"
+    m = re.search(r"(?:open|go to|visit|the)\s+(?:the\s+)?(.+?)(?:\s+(?:link|one|result))?$", text)
+    if m:
+        return search.select_site_by_title(m.group(1))
+
+    if re.search(r"\b(?:cancel|never mind|forget it|exit|close|stop)\b", text):
+        _sess_mod.reset()
+        return Silent("Search closed")
+
+    return None
+
+
+def _dispatch_listing(text: str):
+    """Handle commands when a list is displayed — routes to site or video logic."""
+    from core.response import Silent
+    sess = _sess_mod.get()
+
+    # Route to web search selection if a site list is active
+    if sess.site_list:
+        return _dispatch_site_listing(text)
+
+    # ── YouTube video list ──────────────────────────────────────────────────
 
     # "play number N" / "select 3" / "open the 2nd"
     m = re.search(r"(?:play|open|select|choose|pick)\s+(?:the\s+)?(?:number\s+)?(\d+)", text)
@@ -223,6 +281,15 @@ def _guess_dispatch(text: str):
         matches = difflib.get_close_matches(text, known.keys(), n=1, cutoff=0.6)
         if matches:
             return apps.open_app(matches[0])
+
+    # Pass 3: prefix retry — prepend "open" and re-run intents
+    # Catches bare names like "firefox", "window manager", "youtube"
+    prefixed = f"open {text}"
+    for pattern, handler in INTENTS:
+        m = re.search(pattern, prefixed)
+        if m:
+            groups = m.groups()
+            return handler(*groups) if groups else handler()
 
     return None
 

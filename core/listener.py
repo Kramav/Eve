@@ -13,11 +13,17 @@ class Listener:
 
     def __init__(self):
         print(f"Loading wake word model ({WAKE_WORD})...")
-        self._model = Model(wakeword_models=[WAKE_WORD], inference_framework="onnx")
-        self._q: queue.Queue = queue.Queue()
+        self._model        = Model(wakeword_models=[WAKE_WORD], inference_framework="onnx")
+        self._q:           queue.Queue    = queue.Queue()
+        self._is_speaking: threading.Event | None = None
 
     def _callback(self, indata, frames, time_info, status):
         self._q.put(indata.copy())
+
+    def set_speaking_event(self, event: threading.Event) -> None:
+        """Wire up the speaker's is_speaking flag so wake-word detection
+        is suppressed while TTS is playing (prevents mic feedback loops)."""
+        self._is_speaking = event
 
     def run(self, on_wake=None, on_command=None):
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="int16",
@@ -45,6 +51,8 @@ class Listener:
     def _wait_for_wake_word(self):
         while True:
             chunk = self._q.get().flatten()
+            if self._is_speaking and self._is_speaking.is_set():
+                continue  # drain mic while TTS is playing
             if self._model.predict(chunk).get(WAKE_WORD, 0) > 0.5:
                 return
 

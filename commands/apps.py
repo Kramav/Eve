@@ -66,7 +66,7 @@ def open_app(name: str) -> str:
     cmd = _resolve_exe(cmd)
     try:
         from core import monitor
-        before = monitor.snapshot_windows()
+        before = monitor.snapshot_windows(min_size=0)  # include compact overlay so it's never misidentified as new
         target = monitor.get_target_monitor()
         # SW_SHOWNOACTIVATE = 4: OS-level hint to open without stealing focus
         ctypes.windll.shell32.ShellExecuteW(None, "open", cmd, None, None, 4)
@@ -80,13 +80,30 @@ def open_app(name: str) -> str:
         return f"Couldn't open {name}"
 
 
-def close_app(name: str) -> str:
-    name = name.strip()
+def _resolve_close_exe(name: str) -> str:
     exe = _CLOSE_MAP.get(name.lower(), name)
     if not exe.endswith(".exe"):
         exe += ".exe"
+    return exe
+
+
+def close_app(name: str) -> str:
+    """Graceful close — sends WM_CLOSE, lets the app save and exit cleanly."""
+    name = name.strip()
+    exe  = _resolve_close_exe(name)
     try:
-        subprocess.run(f"taskkill /f /im {exe}", shell=True, capture_output=True)
+        subprocess.run(f"taskkill /im {exe}", shell=True, capture_output=True)
         return f"Closed {name}"
     except Exception:
         return f"Couldn't close {name}"
+
+
+def kill_app(name: str) -> str:
+    """Force kill — immediately terminates the process, no save prompt."""
+    name = name.strip()
+    exe  = _resolve_close_exe(name)
+    try:
+        subprocess.run(f"taskkill /f /im {exe}", shell=True, capture_output=True)
+        return f"Killed {name}"
+    except Exception:
+        return f"Couldn't kill {name}"

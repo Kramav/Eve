@@ -164,10 +164,22 @@ class Display:
         except KeyboardInterrupt:
             proc.terminate()
 
-    # ── Public API: trigger app manager from Python ─────────────────────────
+    # ── Public API: trigger tool windows from Python ────────────────────────
 
     def open_app_manager(self):
         payload = json.dumps({'type': 'open_app_manager'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def open_window_manager(self):
+        payload = json.dumps({'type': 'open_window_manager'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def close_app_manager(self):
+        payload = json.dumps({'type': 'close_app_manager'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def close_window_manager(self):
+        payload = json.dumps({'type': 'close_window_manager'})
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
 
     # ── Public API: HUD state (same interface as before) ────────────────────
