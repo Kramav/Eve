@@ -76,11 +76,9 @@ function avatarColor(name) {
 function renderDiscovered() {
   const list    = document.getElementById('discovered-list')
   const search  = document.getElementById('search').value.toLowerCase()
-  const ph      = document.getElementById('placeholder')
+  const ph = document.getElementById('placeholder')
   if (ph) ph.remove()
-
-  // Remove existing rows (keep scanning msg if present)
-  list.querySelectorAll('.app-row').forEach(el => el.remove())
+  list.querySelectorAll('.scanning-msg, .app-row').forEach(el => el.remove())
 
   const filtered = discovered.filter(app =>
     !search ||

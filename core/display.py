@@ -38,8 +38,9 @@ class Display:
             'list_items':       [],
             'list_status':      '',
         }
-        self._clients = set()
-        self._loop    = asyncio.new_event_loop()
+        self._clients          = set()
+        self._last_scan_payload = None
+        self._loop             = asyncio.new_event_loop()
         threading.Thread(target=self._start_loop, daemon=True).start()
 
     # ── WebSocket server ────────────────────────────────────────────────────
@@ -55,10 +56,14 @@ class Display:
             self._clients.add(ws)
             # Send full current state on connect so Electron is immediately in sync
             await ws.send(self._snapshot())
+            # Re-send last scan result if one exists so a reconnecting client
+            # doesn't get stuck with a disabled Scan button
+            if self._last_scan_payload:
+                await self._push_one(ws, self._last_scan_payload)
             try:
                 async for msg in ws:
                     try:
-                        self._handle_action(json.loads(msg), ws)
+                        await self._handle_action_async(json.loads(msg), ws)
                     except Exception:
                         pass
             except Exception:
@@ -77,18 +82,17 @@ class Display:
             self._state['log_entries'] = []
             return json.dumps(s)
 
-    def _handle_action(self, data, ws):
+    async def _handle_action_async(self, data, ws):
         action = data.get('action')
         if action == 'toggle_hud':
             self.toggle_overlay()
         elif action == 'get_apps_config':
-            asyncio.run_coroutine_threadsafe(
-                self._send_apps_config(ws), self._loop)
+            await self._send_apps_config(ws)
         elif action == 'scan_apps':
-            asyncio.run_coroutine_threadsafe(
-                self._do_scan(ws), self._loop)
+            # Run scan concurrently so WebSocket stays responsive during scan
+            asyncio.ensure_future(self._do_scan())
         elif action == 'save_apps':
-            self._save_apps(data.get('apps', []), ws)
+            await self._save_apps_async(data.get('apps', []), ws)
 
     def _broadcast(self):
         payload = self._snapshot()
@@ -116,9 +120,9 @@ class Display:
         payload = json.dumps({'type': 'apps_config', 'configured': configured})
         await self._push_one(ws, payload)
 
-    async def _do_scan(self, ws):
+    async def _do_scan(self):
         from core import app_scanner
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         discovered = await loop.run_in_executor(None, app_scanner.scan)
         configured = self._load_apps()
         payload = json.dumps({
@@ -126,16 +130,16 @@ class Display:
             'discovered': discovered,
             'configured': configured,
         })
-        await self._push_one(ws, payload)
+        self._last_scan_payload = payload
+        await self._push_all(payload)
 
-    def _save_apps(self, apps: list, ws):
+    async def _save_apps_async(self, apps: list, ws):
         try:
             APPS_FILE.write_text(json.dumps(apps, indent=2))
             result = {'type': 'save_result', 'success': True}
         except Exception as e:
             result = {'type': 'save_result', 'success': False, 'error': str(e)}
-        asyncio.run_coroutine_threadsafe(
-            self._push_one(ws, json.dumps(result)), self._loop)
+        await self._push_one(ws, json.dumps(result))
 
     def _load_apps(self) -> list:
         try:

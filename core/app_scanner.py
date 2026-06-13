@@ -22,12 +22,19 @@ def scan() -> list[dict]:
     """Return sorted list of {name, path, spoken} for discoverable apps."""
     seen:  dict[str, dict] = {}
 
-    for entry in _scan_start_menu():
+    # Fast sources first (pure Python, no subprocess)
+    for entry in _scan_app_paths():
         key = entry['path'].lower()
         if key not in seen:
             seen[key] = entry
 
     for entry in _scan_registry():
+        key = entry['path'].lower()
+        if key not in seen:
+            seen[key] = entry
+
+    # Slower PowerShell scan last — adds apps missing from the fast sources
+    for entry in _scan_start_menu():
         key = entry['path'].lower()
         if key not in seen:
             seen[key] = entry
@@ -45,13 +52,13 @@ $dirs  = @(
 )
 $out = [System.Collections.Generic.List[object]]::new()
 foreach ($dir in $dirs) {
-    if (-not (Test-Path $dir)) { continue }
+    if (-not [System.IO.Directory]::Exists($dir)) { continue }
     Get-ChildItem $dir -Recurse -Filter *.lnk -ErrorAction SilentlyContinue |
     ForEach-Object {
         try {
             $lnk = $shell.CreateShortcut($_.FullName)
             $t   = $lnk.TargetPath
-            if ($t -and $t.ToLower().EndsWith('.exe') -and (Test-Path $t)) {
+            if ($t -and $t.ToLower().EndsWith('.exe') -and [System.IO.File]::Exists($t)) {
                 $out.Add([PSCustomObject]@{ Name = $_.BaseName; Path = $t })
             }
         } catch {}
@@ -64,7 +71,8 @@ $out | ConvertTo-Json -Compress -Depth 2
 def _scan_start_menu() -> list[dict]:
     try:
         res = subprocess.run(
-            ['powershell', '-NoProfile', '-NonInteractive', '-Command', _PS_SCAN],
+            ['powershell', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+             '-Command', _PS_SCAN],
             capture_output=True, text=True, timeout=20,
         )
         raw = res.stdout.strip()
@@ -81,7 +89,37 @@ def _scan_start_menu() -> list[dict]:
         return []
 
 
-# ── Source 2: Uninstall registry ────────────────────────────────────────────
+# ── Source 2: App Paths registry (fast, covers most common apps) ───────────
+
+_APP_PATHS_KEYS = [
+    (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\App Paths'),
+    (winreg.HKEY_CURRENT_USER,  r'SOFTWARE\Microsoft\Windows\App Paths'),
+]
+
+
+def _scan_app_paths() -> list[dict]:
+    apps = []
+    for hive, base in _APP_PATHS_KEYS:
+        try:
+            key = winreg.OpenKey(hive, base)
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                try:
+                    subkey_name = winreg.EnumKey(key, i)
+                    sub = winreg.OpenKey(key, subkey_name)
+                    path = winreg.QueryValue(sub, '').strip().strip('"')
+                    winreg.CloseKey(sub)
+                    if path and path.lower().endswith('.exe') and os.path.isfile(path):
+                        name = Path(subkey_name).stem
+                        apps.append({'name': name, 'path': path, 'spoken': _clean(name)})
+                except Exception:
+                    pass
+            winreg.CloseKey(key)
+        except Exception:
+            pass
+    return apps
+
+
+# ── Source 3: Uninstall registry ────────────────────────────────────────────
 
 _REG_KEYS = [
     (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall'),

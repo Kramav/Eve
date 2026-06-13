@@ -1,3 +1,4 @@
+import difflib
 import json
 import re
 import subprocess
@@ -47,25 +48,42 @@ BUILTIN_MAP = {
     "cancel_shutdown":   system.cancel_shutdown,
 }
 
+_HELP_TEXT = (
+    "I can search and play YouTube, open and close apps, search the web, "
+    "go to websites, set reminders and timers, control volume and media, "
+    "take screenshots, and control your PC. "
+    "Say 'open command editor' to add custom commands."
+)
+
+
+def _help() -> str:
+    return _HELP_TEXT
+
+
 # (regex pattern, handler) — first match wins, captured groups passed as args
 INTENTS = [
     # Command editor — dedicated intent so it isn't mangled by the generic open regex
     (r"(?:open|edit|show|launch) (?:the )?(?:command editor|my commands|eve commands|commands)", system.open_editor),
 
-    # Apps
+    # Help
+    (r"help|what can (?:you|eve) do|list commands|show commands", _help),
+
+    # YouTube — before apps and web search to prevent misrouting
+    # "open youtube" / "show youtube" must not fall through to open_app
+    # "search youtube" must not fall through to web_search
+    (r"(?:open|launch|browse|show(?: me)?) (?:youtube|yt)(?:\s+home(?:page)?)?|^youtube$", youtube.browse_home_intent),
+    (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",             youtube.play_query_intent),
+    (r"(?:play|watch)\s+(.+)",                                    youtube.play_query_intent),
+
+    # Apps (after YouTube so "open youtube" is caught above)
     (r"(?:open|launch|start|pull up|bring up|fire up|boot up|load up|run|start up)\s+(.+)", apps.open_app),
-    (r"(?:close|quit|kill|exit)\s+(.+)",                        apps.close_app),
+    (r"(?:close|quit|kill|exit)\s+(.+)",                          apps.close_app),
 
     # Direct navigation
-    (r"(?:go to|navigate to|take me to|visit|browse to)\s+(.+)", search.go_to_site),
+    (r"(?:go to|navigate to|take me to|visit|browse to)\s+(.+)",  search.go_to_site),
 
-    # Web search
-    (r"(?:search for|look up|google|search|find)\s+(.+)",        search.web_search),
-
-    # YouTube browse/search — must be before media play/pause
-    (r"(?:browse|show me) (?:youtube|yt)(?: ?home(?:page)?)?|^youtube$", youtube.browse_home_intent),
-    (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",                  youtube.play_query_intent),
-    (r"(?:play|watch)\s+(.+)",                                   youtube.play_query_intent),
+    # Web search (after YouTube so "search youtube" is caught above)
+    (r"(?:search for|look up|google|search|find)\s+(.+)",         search.web_search),
 
     # Date / time
     (r"what(?:'?s| is) (?:the )?time",                          system.get_time),
@@ -174,6 +192,41 @@ def _dispatch_playing(text: str):
     return None  # fall through to normal dispatch
 
 
+# Words that speech recognition commonly substitutes for trigger words
+_MISHEAR_SUBS = [
+    (r'\bin\b',  'open'),   # "in firefox"   → "open firefox"
+    (r'\bam\b',  'open'),   # "am firefox"   → "open firefox"
+    (r'\bon\b',  'open'),   # "on firefox"   → "open firefox"
+    (r'\bat\b',  'app'),    # "at manager"   → "app manager"
+    (r'\band\b', 'open'),   # "and firefox"  → "open firefox"
+]
+
+
+def _guess_dispatch(text: str):
+    """Fuzzy fallback: substitute misheared trigger words then retry intents;
+    fall back to difflib match against known app spoken names."""
+
+    # Pass 1: word substitutions — replace a misheared word and re-run intents
+    for pat, rep in _MISHEAR_SUBS:
+        corrected = re.sub(pat, rep, text)
+        if corrected == text:
+            continue
+        for pattern, handler in INTENTS:
+            m = re.search(pattern, corrected)
+            if m:
+                groups = m.groups()
+                return handler(*groups) if groups else handler()
+
+    # Pass 2: fuzzy match the whole phrase against known app spoken names
+    known = apps._load_apps()   # {spoken_name: exe_path}
+    if known:
+        matches = difflib.get_close_matches(text, known.keys(), n=1, cutoff=0.6)
+        if matches:
+            return apps.open_app(matches[0])
+
+    return None
+
+
 def dispatch(text: str):
     text = text.strip().lower()
     text = re.sub(r"[.,!?]+$", "", text).strip()  # strip trailing punctuation Whisper adds
@@ -215,4 +268,9 @@ def dispatch(text: str):
             groups = m.groups()
             return handler(*groups) if groups else handler()
 
-    return "I didn't catch that. Try 'open Firefox' or 'search for something'."
+    # Fuzzy guess — handle speech-recognition mishears before giving up
+    guess = _guess_dispatch(text)
+    if guess is not None:
+        return guess
+
+    return "Not recognized. Say 'help' to hear available commands."
