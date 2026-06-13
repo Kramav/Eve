@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:7734">
+  <title>Eve — Directory</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-left">
+      <span class="titlebar-dot"></span>
+      <span class="titlebar-title">EVE</span>
+      <span class="titlebar-sub">Routing Directory</span>
+    </div>
+    <div class="titlebar-right">
+      <div class="state-pill">
+        <div class="state-dot" id="state-dot"></div>
+        <span class="state-label" id="state-label">Idle</span>
+      </div>
+      <button class="expand-btn" id="expand-btn" title="Toggle fullscreen">⤢</button>
+      <button class="close-btn"  id="close-btn"  title="Hide">✕</button>
+    </div>
+  </div>
+
+  <div class="module-grid" id="module-grid"></div>
+
+  <div class="status-strip" id="status-strip">
+    <span class="status-text"     id="status-text"     style="display:none"></span>
+    <span class="transcript-text" id="transcript-text" style="display:none"></span>
+  </div>
+
+  <div class="result-list" id="result-list" style="display:none">
+    <div class="result-hdr"   id="result-hdr"></div>
+    <div class="result-items" id="result-items"></div>
+  </div>
+
+  <div class="feed-hdr">
+    <span class="feed-hdr-label">ACTIVITY</span>
+    <button class="clr-btn" id="clr-btn">Clear</button>
+  </div>
+  <div class="feed" id="feed">
+    <div class="feed-empty" id="feed-empty">No activity yet</div>
+  </div>
+
+  <div class="conn-bar">
+    <span class="conn-dot disconnected" id="conn-dot"></span>
+    <span class="conn-label" id="conn-label">Connecting…</span>
+    <span class="conn-clock" id="clock"></span>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

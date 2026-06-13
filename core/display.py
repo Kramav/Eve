@@ -86,10 +86,16 @@ class Display:
         action = data.get('action')
         if action == 'toggle_hud':
             self.toggle_overlay()
+        elif action == 'directory_opened':
+            with self._lock: self._state['hud_visible'] = True
+        elif action == 'directory_closed':
+            with self._lock: self._state['hud_visible'] = False
+        elif action == 'open_command_editor':
+            from commands.system import open_editor
+            open_editor()
         elif action == 'get_apps_config':
             await self._send_apps_config(ws)
         elif action == 'scan_apps':
-            # Run scan concurrently so WebSocket stays responsive during scan
             asyncio.ensure_future(self._do_scan())
         elif action == 'save_apps':
             await self._save_apps_async(data.get('apps', []), ws)
@@ -226,6 +232,11 @@ class Display:
     def toggle_overlay(self):
         with self._lock:
             self._state['hud_visible'] = not self._state['hud_visible']
+            opening = self._state['hud_visible']
+        directive = 'show_directory' if opening else 'hide_directory'
+        asyncio.run_coroutine_threadsafe(
+            self._push_all(json.dumps({'type': directive})), self._loop
+        )
         self._broadcast()
 
     def show_list(self, items: list, status: str = 'Which video?'):

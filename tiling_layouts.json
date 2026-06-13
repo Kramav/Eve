@@ -23,6 +23,61 @@
           "h_pct": 0.5
         }
       ]
+    },
+    "2958080376": {
+      "label": "HP 24f",
+      "workX": -1920,
+      "workY": 279,
+      "workWidth": 1920,
+      "workHeight": 1040,
+      "layout": "grid-4",
+      "zones": [
+        {
+          "name": "top-left",
+          "x_pct": 0,
+          "y_pct": 0,
+          "w_pct": 0.5,
+          "h_pct": 0.5
+        },
+        {
+          "name": "top-right",
+          "x_pct": 0.5,
+          "y_pct": 0,
+          "w_pct": 0.5,
+          "h_pct": 0.5
+        },
+        {
+          "name": "bottom-left",
+          "x_pct": 0,
+          "y_pct": 0.5,
+          "w_pct": 0.5,
+          "h_pct": 0.5
+        },
+        {
+          "name": "bottom-right",
+          "x_pct": 0.5,
+          "y_pct": 0.5,
+          "w_pct": 0.5,
+          "h_pct": 0.5
+        }
+      ]
+    },
+    "3804309905": {
+      "label": "DELL G2724D",
+      "workX": 0,
+      "workY": 0,
+      "workWidth": 2048,
+      "workHeight": 1112,
+      "layout": "full",
+      "zones": [
+        {
+          "name": "full",
+          "x_pct": 0,
+          "y_pct": 0,
+          "w_pct": 1,
+          "h_pct": 1
+        }
+      ]
     }
   }
 }

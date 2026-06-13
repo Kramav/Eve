@@ -1,4 +1,4 @@
-// ── WebSocket bridge ───────────────────────────────────────────────────────
+// ── WebSocket bridge ─────────────────────────────────────────────────────────
 const WS_URL = 'ws://127.0.0.1:7734'
 let ws = null
 
@@ -7,10 +7,12 @@ function connect() {
   ws.onmessage = e => {
     try {
       const msg = JSON.parse(e.data)
-      if (msg.type === 'state')                  applyState(msg)
-      else if (msg.type === 'open_app_manager')  window.eve.openAppManager()
-      else if (msg.type === 'open_window_manager')  window.eve.openWindowManager()
+      if      (msg.type === 'state')               applyState(msg)
+      else if (msg.type === 'show_directory')       window.eve.showDirectory()
+      else if (msg.type === 'hide_directory')       window.eve.hideDirectory()
+      else if (msg.type === 'open_app_manager')     window.eve.openAppManager()
       else if (msg.type === 'close_app_manager')    window.eve.closeAppManager()
+      else if (msg.type === 'open_window_manager')  window.eve.openWindowManager()
       else if (msg.type === 'close_window_manager') window.eve.closeWindowManager()
     } catch (_) {}
   }
@@ -18,15 +20,9 @@ function connect() {
   ws.onerror = () => {}
 }
 
-function send(action, data = {}) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ action, ...data }))
-  }
-}
-
 connect()
 
-// ── Canvas orb ─────────────────────────────────────────────────────────────
+// ── Canvas orb ───────────────────────────────────────────────────────────────
 const canvas = document.getElementById('orb')
 const ctx    = canvas.getContext('2d')
 const W = canvas.width, H = canvas.height, CX = W / 2, CY = H / 2
@@ -41,7 +37,6 @@ const ALWAYS_RGB = [255, 51, 85]
 
 let evMode     = 'idle'
 let evAlwaysOn = false
-let evHudOpen  = false
 
 function orbColor(alpha) {
   const [r, g, b] = (evAlwaysOn && evMode === 'idle')
@@ -155,139 +150,21 @@ function _pivot(a) {
 function _roundRect(x, y, w, h, r) {
   ctx.beginPath()
   ctx.moveTo(x + r, y)
-  ctx.lineTo(x + w - r, y);   ctx.quadraticCurveTo(x + w, y,     x + w, y + r)
+  ctx.lineTo(x + w - r, y);     ctx.quadraticCurveTo(x + w, y,     x + w, y + r)
   ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h)
-  ctx.lineTo(x + r, y + h);   ctx.quadraticCurveTo(x,     y + h, x,     y + h - r)
-  ctx.lineTo(x, y + r);       ctx.quadraticCurveTo(x,     y,     x + r, y)
+  ctx.lineTo(x + r, y + h);     ctx.quadraticCurveTo(x,     y + h, x,     y + h - r)
+  ctx.lineTo(x, y + r);         ctx.quadraticCurveTo(x,     y,     x + r, y)
   ctx.closePath()
 }
 
 requestAnimationFrame(drawOrb)
 
-// ── Clock ──────────────────────────────────────────────────────────────────
-;(function tickClock() {
-  const n = new Date(), p = v => String(v).padStart(2, '0')
-  const el = document.getElementById('clock')
-  if (el) el.textContent = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`
-  setTimeout(tickClock, 1000)
-})()
-
-// ── History feed ───────────────────────────────────────────────────────────
-const KIND = { heard: 'You', action: 'Eve', error: 'Error', system: 'Sys' }
-let entryCount = 0
-
-function appendEntry(e) {
-  const feed  = document.getElementById('feed')
-  const empty = document.getElementById('feed-empty')
-  if (empty) empty.style.display = 'none'
-
-  if (entryCount >= 200) {
-    const first = feed.querySelector('.entry')
-    if (first) { feed.removeChild(first); entryCount-- }
-  }
-
-  const div  = document.createElement('div')
-  div.className = `entry ${e.kind}`
-
-  const meta = document.createElement('div'); meta.className = 'e-meta'
-  const tag  = document.createElement('span'); tag.className = 'e-tag'
-  tag.textContent = KIND[e.kind] || e.kind
-
-  const ts   = document.createElement('span'); ts.className = 'e-ts'
-  ts.textContent = e.ts
-
-  meta.append(tag, ts)
-
-  const txt = document.createElement('div'); txt.className = 'e-text'
-  txt.textContent = e.text
-
-  div.append(meta, txt)
-  feed.appendChild(div)
-  entryCount++
-  feed.scrollTop = feed.scrollHeight
-}
-
-function clearFeed() {
-  const feed = document.getElementById('feed')
-  feed.querySelectorAll('.entry').forEach(el => el.remove())
-  entryCount = 0
-  const empty = document.getElementById('feed-empty')
-  if (empty) empty.style.display = ''
-}
-
-// ── Apply state ────────────────────────────────────────────────────────────
-let prev = {}
-
+// ── Apply state ───────────────────────────────────────────────────────────────
 function applyState(s) {
-  const mode     = s.mode || 'idle'
-  const alwaysOn = !!s.active_listening
-  const hudOpen  = !!s.hud_visible
-
-  evMode     = mode
-  evAlwaysOn = alwaysOn
-
-  // Resize Electron window when HUD visibility changes
-  if (hudOpen !== evHudOpen) {
-    evHudOpen = hudOpen
-    window.eve.setSize(!hudOpen)
-  }
-
-  // Drive all CSS state via body classes
-  const cls = []
-  if (mode === 'listening')  cls.push('listening')
-  if (mode === 'processing') cls.push('processing')
-  if (alwaysOn)              cls.push('always-on')
-  if (hudOpen)               cls.push('hud-open')
-  document.body.className = cls.join(' ')
-
-  // State label in HUD header
-  if (mode !== prev.mode || s.status_text !== prev.status_text) {
-    const labels = { idle: 'Idle', listening: 'Listening', processing: 'Thinking', playing: 'Playing' }
-    document.getElementById('state-label').textContent =
-      s.status_text || labels[mode] || 'Idle'
-  }
-
-  // Live area label (always-on vs triggered)
-  document.getElementById('live-label').textContent =
-    (alwaysOn && mode !== 'listening') ? 'Always On' : 'Listening'
-
-  // Live transcript
-  if (s.main_text !== prev.main_text) {
-    document.getElementById('transcript').textContent = s.main_text || ''
-  }
-
-  // History entries (consumed server-side, arrive as a batch)
-  for (const e of (s.log_entries || [])) appendEntry(e)
-
-  // Video / result list
-  const listKey = JSON.stringify(s.list_items)
-  if (listKey !== prev.listKey) {
-    const vlist = document.getElementById('vlist')
-    if (s.list_items && s.list_items.length > 0) {
-      document.getElementById('vlist-hdr').textContent = s.list_status || 'Results'
-      const container = document.getElementById('vlist-items')
-      container.innerHTML = ''
-      s.list_items.forEach(item => {
-        const d = document.createElement('div')
-        d.className = 'vlist-item'
-        d.textContent = item
-        container.appendChild(d)
-      })
-      vlist.classList.add('visible')
-    } else {
-      vlist.classList.remove('visible')
-    }
-    prev.listKey = listKey
-  }
-
-  prev = {
-    mode:        s.mode,
-    status_text: s.status_text,
-    main_text:   s.main_text,
-    listKey:     prev.listKey,
-  }
+  evMode     = s.mode || 'idle'
+  evAlwaysOn = !!s.active_listening
+  document.body.className = evAlwaysOn ? 'always-on' : ''
 }
 
-// ── User actions ───────────────────────────────────────────────────────────
-document.getElementById('orb-wrap').addEventListener('click', () => send('toggle_hud'))
-document.getElementById('clr-btn').addEventListener('click', clearFeed)
+// ── Orb click opens directory ─────────────────────────────────────────────────
+document.getElementById('orb-wrap').addEventListener('click', () => window.eve.toggleDirectory())

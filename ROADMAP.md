@@ -18,6 +18,10 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 - **Workspace presets** — save all current window positions as a named preset, restore by voice.
   "save layout as work", "restore work layout". Store in `tiling_layouts.json` under a `workspaces` key.
   Python: `core/window_manager.py` already has `enumerate_windows()` as the foundation.
+- **Identify Monitors** - display numbers on each monitor for UX. This should streamline the Window Manager process.  Window manager should be configurable with voice commands. "Set monitor one to 2x2 grid"  "Name monitor 2 Primary display" "Set HUD display to primary display"  "Move hud to monitor three" "Move hud window 1 top-left"
+
+### Voice
+- **Change TTS Voice to sound better**
 
 ### Dialogue
 - **Converse pattern** — generalize `core/session.py` beyond YouTube/Playing mode so any command

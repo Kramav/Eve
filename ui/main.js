@@ -1,18 +1,18 @@
-const { app, BrowserWindow, ipcMain, screen } = require('electron')
+const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } = require('electron')
 const fs   = require('fs')
 const path = require('path')
-
-const COMPACT  = { w: 96,  h: 96  }
-const EXPANDED = { w: 380, h: 620 }
 
 const SETTINGS_FILE = path.join(__dirname, '..', 'settings.json')
 const TILING_FILE   = path.join(__dirname, '..', 'tiling_layouts.json')
 
-let win              = null
+let orbWin           = null
+let dirWin           = null
 let appManagerWin    = null
 let windowManagerWin = null
+let tray             = null
+let _savedDirBounds  = null
 
-// ── Persistent settings ────────────────────────────────────────────────────
+// ── Settings ─────────────────────────────────────────────────────────────────
 
 function loadSettings() {
   try { return JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) } catch { return {} }
@@ -23,9 +23,9 @@ function saveSettings(patch) {
   fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ ...s, ...patch }, null, 2))
 }
 
-// ── Monitor helpers ────────────────────────────────────────────────────────
+// ── Display helpers ───────────────────────────────────────────────────────────
 
-function getOverlayDisplay() {
+function getOrbDisplay() {
   const { overlayDisplayId } = loadSettings()
   const all = screen.getAllDisplays()
   if (overlayDisplayId) {
@@ -35,63 +35,138 @@ function getOverlayDisplay() {
   return screen.getPrimaryDisplay()
 }
 
-// Top-right anchor for a given display (absolute screen coordinates)
-function anchorFor(display) {
-  const { x, y, width } = display.bounds
-  return { right: x + width, top: y }
+function positionOrb() {
+  if (!orbWin || orbWin.isDestroyed()) return
+  const { x, y, width } = getOrbDisplay().bounds
+  orbWin.setPosition(x + width - 96 - 10, y + 10)
 }
 
-// ── Overlay window ─────────────────────────────────────────────────────────
-
-function createWindow() {
-  const { right, top } = anchorFor(getOverlayDisplay())
-
-  win = new BrowserWindow({
-    width:       COMPACT.w,
-    height:      COMPACT.h,
-    x:           right - COMPACT.w - 10,
-    y:           top   + 10,
-    frame:       false,
-    transparent: true,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable:   false,
-    webPreferences: {
-      preload:          path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-    },
-  })
-
-  win.loadFile(path.join(__dirname, 'src', 'index.html'))
+function positionDirectory() {
+  if (!dirWin || dirWin.isDestroyed()) return
+  const { x, y, width } = getOrbDisplay().bounds
+  dirWin.setPosition(x + width - 700 - 10, y + 116)  // below orb: 96 + 10 + 10
 }
 
-// Resize/reposition overlay when HUD is toggled.
-// Always uses the SAVED overlay display preference — never dynamic window-center
-// detection, which causes monitor drift on multi-monitor setups.
-ipcMain.on('set-size', (_, { compact }) => {
-  if (!win) return
-  const { right, top } = anchorFor(getOverlayDisplay())
-  if (compact) {
-    win.setSize(COMPACT.w, COMPACT.h)
-    win.setPosition(right - COMPACT.w - 10, top + 10)
-  } else {
-    win.setSize(EXPANDED.w, EXPANDED.h)
-    win.setPosition(right - EXPANDED.w - 10, top + 10)
+// ── Tray icon (programmatic 16×16 blue circle) ────────────────────────────────
+
+function buildTrayIcon() {
+  const size = 16
+  const buf  = Buffer.alloc(size * size * 4)
+  const cx = size / 2, cy = size / 2, r = size / 2 - 1
+  for (let row = 0; row < size; row++) {
+    for (let col = 0; col < size; col++) {
+      const inside = Math.sqrt((col - cx) ** 2 + (row - cy) ** 2) <= r
+      const i = (row * size + col) * 4
+      buf[i] = 74; buf[i+1] = 158; buf[i+2] = 255
+      buf[i+3] = inside ? 220 : 0
+    }
   }
+  return nativeImage.createFromBuffer(buf, { width: size, height: size })
+}
+
+function createTray() {
+  tray = new Tray(buildTrayIcon())
+  tray.setToolTip('Eve')
+  tray.on('click', () => toggleDirectory())
+  const menu = Menu.buildFromTemplate([
+    { label: 'Open Directory',  click: () => showDirectory()     },
+    { label: 'Window Manager',  click: () => openWindowManager() },
+    { label: 'App Manager',     click: () => openAppManager()    },
+    { type: 'separator' },
+    { label: 'Quit Eve',        click: () => app.quit()          },
+  ])
+  tray.setContextMenu(menu)
+}
+
+// ── Orb window ────────────────────────────────────────────────────────────────
+
+function createOrbWin() {
+  orbWin = new BrowserWindow({
+    width: 96, height: 96,
+    frame: false, transparent: true,
+    alwaysOnTop: true, skipTaskbar: true, resizable: false,
+    focusable: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+  })
+  orbWin.loadFile(path.join(__dirname, 'src', 'index.html'))
+  positionOrb()
+  orbWin.on('close', e => { if (!app.isQuitting) e.preventDefault() })
+}
+
+// ── Directory window ──────────────────────────────────────────────────────────
+
+function createDirWin() {
+  dirWin = new BrowserWindow({
+    width: 700, height: 520,
+    frame: false, transparent: true,
+    alwaysOnTop: true, skipTaskbar: true, resizable: false, show: false,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+  })
+  dirWin.loadFile(path.join(__dirname, 'src', 'directory', 'index.html'))
+  dirWin._ready = false
+  dirWin.once('ready-to-show', () => { dirWin._ready = true })
+  dirWin.on('close', e => {
+    if (!app.isQuitting) { e.preventDefault(); hideDirectory() }
+  })
+}
+
+function showDirectory() {
+  if (!dirWin || dirWin.isDestroyed()) createDirWin()
+  dirWin._expanded = false
+  _savedDirBounds  = null
+  const { x, y, width } = getOrbDisplay().bounds
+  dirWin.setBounds({ x: x + width - 700 - 10, y: y + 116, width: 700, height: 520 })
+  if (dirWin._ready) {
+    dirWin.show()
+    dirWin.focus()
+  } else {
+    dirWin.once('ready-to-show', () => { dirWin.show(); dirWin.focus() })
+  }
+}
+
+function hideDirectory() {
+  if (!dirWin || dirWin.isDestroyed() || !dirWin.isVisible()) return
+  dirWin._expanded = false
+  _savedDirBounds  = null
+  dirWin.hide()
+}
+
+function toggleDirectory() {
+  if (dirWin && !dirWin.isDestroyed() && dirWin.isVisible()) hideDirectory()
+  else showDirectory()
+}
+
+// ── IPC ───────────────────────────────────────────────────────────────────────
+
+ipcMain.on('show-directory',   () => showDirectory())
+ipcMain.on('hide-directory',   () => hideDirectory())
+ipcMain.on('toggle-directory', () => toggleDirectory())
+
+ipcMain.on('toggle-directory-size', () => {
+  if (!dirWin || dirWin.isDestroyed()) return
+  if (dirWin._expanded) {
+    dirWin._expanded = false
+    if (_savedDirBounds) {
+      dirWin.setBounds(_savedDirBounds)
+      _savedDirBounds = null
+    } else {
+      const { x, y, width } = getOrbDisplay().bounds
+      dirWin.setBounds({ x: x + width - 700 - 10, y: y + 116, width: 700, height: 520 })
+    }
+  } else {
+    _savedDirBounds  = dirWin.getBounds()
+    dirWin._expanded = true
+    const wa = screen.getDisplayMatching(_savedDirBounds).workArea
+    dirWin.setBounds({ x: wa.x, y: wa.y, width: wa.width, height: wa.height })
+  }
+  dirWin.webContents.send('directory-size-changed', { expanded: !!dirWin._expanded })
 })
 
-// Move overlay to a specific display and persist the choice
 ipcMain.on('set-overlay-display', (_, { displayId }) => {
   saveSettings({ overlayDisplayId: displayId })
-  const display = screen.getAllDisplays().find(d => d.id === displayId) || screen.getPrimaryDisplay()
-  const { right, top } = anchorFor(display)
-  if (win) {
-    win.setSize(COMPACT.w, COMPACT.h)
-    win.setPosition(right - COMPACT.w - 10, top + 10)
-  }
+  positionOrb()
+  if (dirWin && !dirWin.isDestroyed() && dirWin.isVisible()) positionDirectory()
 })
-
-// ── Tiling layouts ─────────────────────────────────────────────────────────
 
 ipcMain.handle('get-tiling-layouts', () => {
   try   { return JSON.parse(fs.readFileSync(TILING_FILE, 'utf8')) }
@@ -103,18 +178,14 @@ ipcMain.handle('set-tiling-layout', (_, { monitorId, monitorData }) => {
   try { layouts = JSON.parse(fs.readFileSync(TILING_FILE, 'utf8')) } catch {}
   if (!layouts.monitors) layouts.monitors = {}
   layouts.monitors[String(monitorId)] = monitorData
-  try {
-    fs.writeFileSync(TILING_FILE, JSON.stringify(layouts, null, 2))
-    return { success: true }
-  } catch (e) { return { success: false, error: e.message } }
+  try { fs.writeFileSync(TILING_FILE, JSON.stringify(layouts, null, 2)); return { success: true } }
+  catch (e) { return { success: false, error: e.message } }
 })
 
-// Return all displays with full metadata for UI consumers
 ipcMain.handle('get-displays', () => {
   const primary              = screen.getPrimaryDisplay()
   const { overlayDisplayId } = loadSettings()
   const pinnedId             = overlayDisplayId || primary.id
-
   return screen.getAllDisplays().map((d, i) => ({
     id:          d.id,
     index:       i + 1,
@@ -135,37 +206,13 @@ ipcMain.handle('get-displays', () => {
   }))
 })
 
-// ── Display change events → notify Window Manager window ──────────────────
-
-function broadcastDisplayChange() {
-  if (windowManagerWin && !windowManagerWin.isDestroyed()) {
-    windowManagerWin.webContents.send('displays-changed')
-  }
-}
-
-// ── App Manager window ─────────────────────────────────────────────────────
-
 function openAppManager() {
-  if (appManagerWin && !appManagerWin.isDestroyed()) {
-    appManagerWin.focus()
-    return
-  }
-
+  if (appManagerWin && !appManagerWin.isDestroyed()) { appManagerWin.focus(); return }
   appManagerWin = new BrowserWindow({
-    width:           860,
-    height:          620,
-    minWidth:        640,
-    minHeight:       460,
-    title:           'Eve — App Manager',
-    backgroundColor: '#080e18',
-    frame:           true,
-    resizable:       true,
-    webPreferences: {
-      preload:          path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-    },
+    width: 860, height: 620, minWidth: 640, minHeight: 460,
+    title: 'Eve — App Manager', backgroundColor: '#080e18', frame: true, resizable: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
-
   appManagerWin.setMenuBarVisibility(false)
   appManagerWin.loadFile(path.join(__dirname, 'src', 'app-manager', 'index.html'))
   appManagerWin.on('closed', () => { appManagerWin = null })
@@ -176,29 +223,13 @@ ipcMain.on('close-app-manager', () => {
   if (appManagerWin && !appManagerWin.isDestroyed()) appManagerWin.close()
 })
 
-// ── Window Manager window ──────────────────────────────────────────────────
-
 function openWindowManager() {
-  if (windowManagerWin && !windowManagerWin.isDestroyed()) {
-    windowManagerWin.focus()
-    return
-  }
-
+  if (windowManagerWin && !windowManagerWin.isDestroyed()) { windowManagerWin.focus(); return }
   windowManagerWin = new BrowserWindow({
-    width:           860,
-    height:          680,
-    minWidth:        640,
-    minHeight:       520,
-    title:           'Eve — Window Manager',
-    backgroundColor: '#080e18',
-    frame:           true,
-    resizable:       true,
-    webPreferences: {
-      preload:          path.join(__dirname, 'preload.js'),
-      contextIsolation: true,
-    },
+    width: 860, height: 680, minWidth: 640, minHeight: 520,
+    title: 'Eve — Window Manager', backgroundColor: '#080e18', frame: true, resizable: true,
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
-
   windowManagerWin.setMenuBarVisibility(false)
   windowManagerWin.loadFile(path.join(__dirname, 'src', 'window-manager', 'index.html'))
   windowManagerWin.on('closed', () => { windowManagerWin = null })
@@ -209,13 +240,23 @@ ipcMain.on('close-window-manager', () => {
   if (windowManagerWin && !windowManagerWin.isDestroyed()) windowManagerWin.close()
 })
 
-// ── Lifecycle ──────────────────────────────────────────────────────────────
+function broadcastDisplayChange() {
+  positionOrb()
+  if (dirWin && !dirWin.isDestroyed() && dirWin.isVisible()) positionDirectory()
+  if (windowManagerWin && !windowManagerWin.isDestroyed())
+    windowManagerWin.webContents.send('displays-changed')
+}
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 app.whenReady().then(() => {
-  createWindow()
+  createOrbWin()
+  createDirWin()   // pre-warm: content loads in background before first open
+  createTray()
   screen.on('display-added',           broadcastDisplayChange)
   screen.on('display-removed',         broadcastDisplayChange)
   screen.on('display-metrics-changed', broadcastDisplayChange)
 })
 
-app.on('window-all-closed', () => app.quit())
+app.on('window-all-closed', () => {})       // app lives in tray
+app.on('before-quit', () => { app.isQuitting = true })
