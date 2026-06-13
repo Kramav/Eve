@@ -6,11 +6,6 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 
 ## P1 — High Priority
 
-### Voice Quality
-- **Piper TTS** — replace `pyttsx3`/Zira with Piper (offline, neural, sounds like a real voice).
-  Install: `pip install piper-tts`. Load a voice model (e.g. `en_US-lessac-medium`).
-  Change is isolated to `core/speaker.py`. Drop-in swap, highest ROI of any single change.
-
 ### Tiling / Window Management
 - **Snap + open** — "snap firefox to top" when Firefox is closed should open it *and* snap it.
   Currently returns "Firefox isn't open." Fix: combine `apps.open_app()` + `monitor.move_new_window()`
@@ -19,9 +14,6 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
   "save layout as work", "restore work layout". Store in `tiling_layouts.json` under a `workspaces` key.
   Python: `core/window_manager.py` already has `enumerate_windows()` as the foundation.
 - **Identify Monitors** - display numbers on each monitor for UX. This should streamline the Window Manager process.  Window manager should be configurable with voice commands. "Set monitor one to 2x2 grid"  "Name monitor 2 Primary display" "Set HUD display to primary display"  "Move hud to monitor three" "Move hud window 1 top-left"
-
-### Voice
-- **Change TTS Voice to sound better**
 
 ### Dialogue
 - **Converse pattern** — generalize `core/session.py` beyond YouTube/Playing mode so any command
@@ -104,3 +96,13 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 | Silence threshold fix | Raised 400 → 800 to stop 30-second recording timeouts |
 | Firefox maximize | `ShowWindow(SW_MAXIMIZE)` after placement in monitor.py |
 | Open app manager intent | Added to dispatcher INTENTS so close/kill work via voice |
+| Piper TTS | `core/speaker.py` rewritten; `PiperVoice.synthesize()` → `audio_float_array` → sounddevice |
+| Routing Directory UI | Separate `dirWin` (700×520) + `orbWin` (96×96) + system tray; module tiles, activity feed, status strip, result list |
+| Orb toggle behavior | Orb click toggles directory open/close via `toggle-directory` IPC |
+| X button / tray hide | Close button always hides to tray; never kills process; `hideDirectory()` resets expanded state |
+| Fullscreen bounds save/restore | `_savedDirBounds` saved before expand; `setBounds()` restores atomically on collapse |
+| DWM white border fix | `dirWin` uses `transparent: true` to eliminate NC area border on focus transfer |
+| Monitor-aware fullscreen | `screen.getDisplayMatching(dirWin.getBounds())` expands to window's current display |
+| Blink-on-open fix | `dirWin` pre-warmed at startup; `ready-to-show` guard ensures `show()` only fires after first paint |
+| NC resize handle fix | Removed all `setResizable(true/false)` calls; `dirWin` stays `resizable: false` always |
+| Expand button state | `directory-size-changed` IPC event syncs button icon (⛶ / ❐) to expanded state |
