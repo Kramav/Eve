@@ -80,6 +80,10 @@ def build_catalog() -> list[tuple[str, Callable, tuple]]:
 
     # ─── System actions ──────────────────────────────────────────────────
     cat += [
+        ('identify monitors',       system.identify_monitors, ()),
+        ('show monitor numbers',    system.identify_monitors, ()),
+        ('which monitor is which',  system.identify_monitors, ()),
+        ('label displays',          system.identify_monitors, ()),
         ('volume up',               system.volume_up,         ()),
         ('volume down',             system.volume_down,       ()),
         ('mute',                    system.toggle_mute,       ()),

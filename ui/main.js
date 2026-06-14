@@ -286,6 +286,60 @@ ipcMain.on('close-voice-settings', () => {
   if (voiceSettingsWin && !voiceSettingsWin.isDestroyed()) voiceSettingsWin.close()
 })
 
+// ── Identify Monitors (voice: "identify monitors") ───────────────────────────
+
+let _monitorIdWins = []
+
+function identifyMonitors(durationMs = 3500) {
+  // Close any prior identify session immediately so re-triggers don't stack
+  for (const w of _monitorIdWins) {
+    if (w && !w.isDestroyed()) w.close()
+  }
+  _monitorIdWins = []
+
+  const primary  = screen.getPrimaryDisplay()
+  const displays = screen.getAllDisplays()
+  const CARD     = 340
+  const HTML     = path.join(__dirname, 'src', 'monitor-id', 'index.html')
+
+  displays.forEach((d, i) => {
+    const { x, y, width, height } = d.bounds
+    const win = new BrowserWindow({
+      width: CARD, height: CARD,
+      x: Math.round(x + (width  - CARD) / 2),
+      y: Math.round(y + (height - CARD) / 2),
+      frame: false, transparent: true,
+      alwaysOnTop: true, skipTaskbar: true, resizable: false,
+      focusable: false, hasShadow: false,
+      webPreferences: { contextIsolation: true },
+    })
+    win.setAlwaysOnTop(true, 'screen-saver', 1)
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+
+    const hash = new URLSearchParams({
+      index:   String(i + 1),
+      label:   d.label || `Display ${i + 1}`,
+      primary: d.id === primary.id ? '1' : '0',
+      meta:    `${d.bounds.width}x${d.bounds.height}`,
+    }).toString()
+    win.loadURL(`file://${HTML.replace(/\\/g, '/')}#${hash}`)
+
+    win.on('closed', () => {
+      _monitorIdWins = _monitorIdWins.filter(w => w !== win)
+    })
+    _monitorIdWins.push(win)
+  })
+
+  setTimeout(() => {
+    for (const w of _monitorIdWins) {
+      if (w && !w.isDestroyed()) w.close()
+    }
+    _monitorIdWins = []
+  }, durationMs)
+}
+
+ipcMain.on('identify-monitors', () => identifyMonitors())
+
 // ── Snap panel (voice: "snap window manager to top-left") ────────────────────
 
 const _panelGetters = {

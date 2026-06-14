@@ -301,6 +301,11 @@ class Display:
         })
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
 
+    def identify_monitors(self):
+        """Briefly flash a big numbered card on each monitor for UX clarity."""
+        payload = json.dumps({'type': 'identify_monitors'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
     # ── Public API: HUD state (same interface as before) ────────────────────
 
     def show(self, status: str = '', text: str = '', color: str = 'idle'):

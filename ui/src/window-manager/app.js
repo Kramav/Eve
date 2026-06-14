@@ -318,6 +318,10 @@ document.getElementById('refresh-btn').addEventListener('click', () => {
   setStatus('Refreshing…')
   loadAndRender()
 })
+document.getElementById('identify-btn').addEventListener('click', () => {
+  window.eve.identifyMonitors()
+  setStatus('Identifying monitors…', 'ok')
+})
 
 // ── Display change events (hotplug) ────────────────────────────────────────
 if (window.eve && window.eve.onDisplaysChanged) {

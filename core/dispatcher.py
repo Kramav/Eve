@@ -71,6 +71,11 @@ INTENTS = [
     (r"(?:close|quit|exit|dismiss) (?:the )?window manager",   system.close_window_manager),
     (r"kill (?:the )?window manager",                           system.close_window_manager),
 
+    # Identify Monitors — flash a numbered card on each monitor.
+    # (?:\w+\s+){0,2}? tolerates filler like "show me monitor numbers" / "label all displays"
+    (r"\b(?:identify|show|label|number)\s+(?:\w+\s+){0,2}?(?:monitors?|displays?|screens?)\b",  system.identify_monitors),
+    (r"which\s+monitor\s+is\s+which",                                                            system.identify_monitors),
+
     # App Manager
     (r"(?:open|show|launch) (?:the )?app manager",             system.open_app_manager),
     (r"(?:close|quit|exit|dismiss) (?:the )?app manager",      system.close_app_manager),

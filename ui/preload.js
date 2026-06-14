@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('eve', {
   openVoiceSettings:   () => ipcRenderer.send('open-voice-settings'),
   closeVoiceSettings:  () => ipcRenderer.send('close-voice-settings'),
   snapPanel:           (panel, bounds) => ipcRenderer.send('snap-panel', { panel, bounds }),
+  identifyMonitors:    () => ipcRenderer.send('identify-monitors'),
   getVoiceSettings:    () => ipcRenderer.invoke('get-voice-settings'),
   getVoicePresets:     () => ipcRenderer.invoke('get-voice-presets'),
   saveVoicePreset:     (name, params) => ipcRenderer.invoke('save-voice-preset', { name, params }),

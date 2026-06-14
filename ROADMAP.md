@@ -7,26 +7,20 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 ## P1 — High Priority
 
 ### Tiling / Window Management
-- **Snap + open** — "snap firefox to top" when Firefox is closed should open it *and* snap it.
-  Currently returns "Firefox isn't open." Fix: combine `apps.open_app()` + `monitor.move_new_window()`
-  but pass zone rect instead of centering. Lives in `commands/tiling.py`.
 - **Workspace presets** — save all current window positions as a named preset, restore by voice.
   "save layout as work", "restore work layout". Store in `tiling_layouts.json` under a `workspaces` key.
   Python: `core/window_manager.py` already has `enumerate_windows()` as the foundation.
-- **Identify Monitors** - display numbers on each monitor for UX. This should streamline the Window Manager process.  Window manager should be configurable with voice commands. "Set monitor one to 2x2 grid"  "Name monitor 2 Primary display" "Set HUD display to primary display"  "Move hud to monitor three" "Move hud window 1 top-left"
-
-### Voice / UI Commands
-- **Fix routing directory voice commands** — "open directory" / "close directory" not reliably
-  triggering show/hide. Audit `_OPEN_DIRECTORY` regex in `main.py` and the `toggle_overlay()`
-  path in `core/display.py`; ensure open and close are separate intents, not a single toggle.
-- **Voice labels must match UI labels** — rule: any string visible on a tile or button must work
-  as a spoken command (with or without "open"). Enforce by keeping `MODULES` labels in sync with
-  the regex patterns in `main.py` whenever either side changes.
+- **Voice-config Window Manager** — Window Manager should be configurable by voice now that monitor
+  numbers are visible. Examples: "Set monitor one to 2x2 grid", "Name monitor 2 Primary display",
+  "Set HUD display to primary display", "Move HUD to monitor three", "Move HUD window 1 top-left".
+  Phase 1 (visual identify) is done; this is phase 2 — voice → WM state mutation.
 
 ### Dialogue
-- **Converse pattern** — generalize `core/session.py` beyond YouTube/Playing mode so any command
-  handler can claim follow-up utterances. Example: "set timer 5 minutes" → "cancel it" should route
-  back to the timer handler without re-matching. Pattern modeled on OVOS ConverseService.
+- **Generalize Converse pattern** — extend the single-turn `pending_confirm` mechanic into a full
+  converse layer so any command handler (timers, reminders, video playback) can claim follow-up
+  utterances. Example: "set timer 5 minutes" → "cancel it" routes back to the timer handler without
+  re-matching from scratch. Pattern modeled on OVOS ConverseService. Lives in `core/session.py`
+  alongside the existing `Mode` and `pending_confirm`.
 
 ### UI / UX
 - **Command Editor inline UI** — replace the current external editor (`open_editor()` opens a file
@@ -34,38 +28,28 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
   Window Manager. Inline editor with syntax highlighting for the custom commands JSON/YAML,
   save button, live reload on save. Lives in `ui/src/command-editor/`.
 
-### Change TTS Tone
-- **Tone is bad** - I hate the default Piper-TTS voice
+### TTS
+- **Change TTS Tone** — default Piper voice (`en_US-lessac-medium`) sounds bad. Voice swap is now
+  fully wired (drop `.onnx` + `.onnx.json` pair into `models/voices/`, pick from Voice Settings
+  dropdown), so this is just a matter of grabbing a better voice from
+  https://huggingface.co/rhasspy/piper-voices and selecting it.
+
 ---
 
 ## P2 — Medium Priority
 
-### Voice Understanding
-- **Near-miss intent suggestion** — when a phrase doesn't match any intent but is close to a
-  known command label or panel name, speak a confirmation prompt instead of "not recognized."
-  Example: "voice manager" → "Did you mean voice settings?" User says "yes" / "no" to confirm.
-  Different from prefix-retry (which guesses the command) — this guesses the *meaning* using
-  fuzzy string similarity (`rapidfuzz.fuzz.partial_ratio`) against a flat list of labeled intents
-  and UI panel names. Requires the converse pattern (P1) to handle the yes/no follow-up.
-  Lives in `core/dispatcher.py` as a third-pass after prefix-retry, before Silent fallback.
-- **Padatious-style intent matching** — add an example-based intent layer alongside regex.
-  Write phrase examples instead of hand-tuned patterns; handles natural paraphrasing.
-  Could use `padatious` pip package or `rapidfuzz` for lightweight fuzzy matching.
-  Add as a second-pass in `_guess_dispatch()` before the prefix-retry.
-- **Utterance transformer pipeline** — formalize `_MISHEAR_SUBS` into a configurable list of
-  pre-processing functions (spell correction, abbreviation expansion, filler word removal).
-  Lives in `core/dispatcher.py`. Makes mishear handling easier to extend.
-
 ### Fallback
-- **LLM fallback via Ollama** — when no intent matches, route to a local Ollama model instead of
-  returning "not recognized." Config: `FALLBACK_LLM = "ollama"` / `"none"`. Model: `llama3` or
-  `mistral`. Keeps Eve useful for general questions without cloud dependency.
-  Add at bottom of `dispatch()` in `core/dispatcher.py`.
+- **LLM fallback via Ollama** — when no intent matches and the catalog score is below MED threshold,
+  route to a local Ollama model instead of returning "not recognized." Config: `FALLBACK_LLM = "ollama"`
+  / `"none"`. Model: `llama3` or `mistral`. Keeps Eve useful for general questions without cloud
+  dependency. Add at bottom of `dispatch()` in `core/dispatcher.py`, just before the final
+  "Not recognized" return.
 
 ### Tiling / Window Management
 - **Auto-snap on launch** — if an app has a saved zone assignment, auto-snap it when opened via
   voice rather than centering on monitor. Requires a zone-per-app mapping in `tiling_layouts.json`.
-  `commands/apps.py` open_app() checks tiling config and calls `move_new_window` with zone rect.
+  `commands/apps.py` open_app() checks tiling config and calls `move_new_window_to_rect` with the
+  saved zone rect.
 
 ---
 
@@ -77,8 +61,6 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
   a `RESEARCH.md` update directly to the GitHub repo. Requires a GitHub PAT with repo write access
   set as `GITHUB_TOKEN` in the CCR environment. A second agent (manually triggered) reviews
   `RESEARCH.md` and promotes findings to ROADMAP.md. Blocked on: setting up GitHub PAT in cloud env.
-
-
 
 ### Architecture
 - **STT abstraction layer** — abstract `core/transcriber.py` behind an `STTEngine` interface.
@@ -93,9 +75,10 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 - **Wake word customization** — allow users to set a custom wake word via the App Manager UI
   rather than editing `config.py`. Store in `settings.json`.
 - **Multi-turn reminders** — "remind me to check email" → "when?" → "at 3pm". Requires
-  converse pattern (P1) first.
+  generalized Converse pattern (P1) first.
 - **Confidence scores** — return confidence alongside responses; surface low-confidence matches
-  with a confirmation prompt rather than executing blindly.
+  with a confirmation prompt rather than executing blindly. (Partly done — see `intent_match.py`
+  tiered confidence; could be extended to in-pipeline intents.)
 
 ### Platform
 - **Windows notification integration** — use Windows toast notifications for reminders instead of
@@ -114,7 +97,7 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 | HUD drift fix | `set-size` uses `getOverlayDisplay()` not dynamic window center |
 | App close/kill | Graceful `close` vs force `kill` distinction |
 | Prefix retry | Unrecognized "firefox" → tries "open firefox" |
-| Mishear substitutions | "at manager" → "app manager" etc. |
+| Mishear substitutions | Expanded set: "at manager" → "app manager", "hood" → "hud", "voice manor" → "voice manager", filler-word strip ("show me", "please"), verb mishears, etc. |
 | TTS gate on listener | Wake word suppressed while Eve is speaking |
 | Silence threshold fix | Raised 400 → 800 to stop 30-second recording timeouts |
 | Firefox maximize | `ShowWindow(SW_MAXIMIZE)` after placement in monitor.py |
@@ -129,3 +112,20 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 | Blink-on-open fix | `dirWin` pre-warmed at startup; `ready-to-show` guard ensures `show()` only fires after first paint |
 | NC resize handle fix | Removed all `setResizable(true/false)` calls; `dirWin` stays `resizable: false` always |
 | Expand button state | `directory-size-changed` IPC event syncs button icon (⛶ / ❐) to expanded state |
+| Voice Settings panel | Sliders for speed/expressiveness/pitch, presets w/ save+delete, Test/Save/Defaults, persisted in `settings.json` |
+| Voice commands for every panel | "app manager", "window manager", "voice manager"/"voice settings", "command editor", "routing directory" all open via voice |
+| Open/close routing directory split | Separate `_OPEN_DIRECTORY` and `_CLOSE_DIRECTORY` regexes; `show_directory()`/`hide_directory()` are state-checked no-ops if already in target state |
+| Orb above fullscreen games | `setAlwaysOnTop(true, 'screen-saver', 1)` + `setVisibleOnAllWorkspaces` + 2s periodic re-assert defeats Windows' demotion of topmost flags when fullscreen apps grab focus |
+| Routing directory above fullscreen | Same z-order treatment as orb; `present()` pre- and post-asserts topmost around `show()` |
+| Online/Offline listener toggle | Clickable state pill in directory titlebar; toggles `listener.enabled`; offline state shown via red dot + dim orb |
+| Snap + open | "snap firefox to top" now launches Firefox AND places it in the top zone via `apps.open_app(snap_rect=...)` + `monitor.move_new_window_to_rect` |
+| Snap UI panels to zones | "snap window manager to top-left" works for routing directory, app/window/voice managers via WS `snap_panel` → IPC → `setBounds` |
+| DPI-aware tiling | Python set to PROCESS_PER_MONITOR_DPI_AWARE; Window Manager saves per-monitor `scaleFactor`; `_zone_pixel_rect(physical=...)` converts DIPs → physical px for Win32 |
+| Multiple TTS voices | `models/voices/` directory scanned at startup; Voice Settings dropdown lists all available; live swap via speaker sentinel queue preserves speed/noise tuning across switch |
+| Filler-word tolerance | Overlay regex allows up to 2 filler words via `(?:\w+\s+){0,2}?`; `re.I` + `\s+` make it forgiving of NBSP and case |
+| Multi-aliased "hud" command | "hud", "show hud", "hide hud" all route to overlay toggle |
+| Tiered fuzzy guess pipeline | `core/intent_match.py` builds 60+ phrase catalog (apps + panels + aliases); `rapidfuzz.token_set_ratio` scoring; HIGH ≥ 88 silent-exec, MED ≥ 68 "did you mean?", below MED no-match |
+| Single-turn confirmation | `Session.pending_confirm` stashes a callable + args; next utterance checked for yes/no; "did you mean" prompts auto-resolve |
+| Near-miss intent suggestion | Phrase similarity against intent catalog; was P2, now done as part of the tiered guess pipeline |
+| Utterance preprocessing | Centralized `_apply_mishear_subs()`; whitespace collapse + filler removal happens before regex + before catalog score |
+| Identify Monitors (visual) | "identify monitors" / WM Identify button briefly flashes a big numbered card on each display (~3.5s); primary monitor styled green. `ui/src/monitor-id/` + `identifyMonitors()` in `ui/main.js` + WS `identify_monitors` action |

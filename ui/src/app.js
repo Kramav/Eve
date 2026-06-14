@@ -17,6 +17,7 @@ function connect() {
       else if (msg.type === 'open_voice_settings')  window.eve.openVoiceSettings()
       else if (msg.type === 'close_voice_settings') window.eve.closeVoiceSettings()
       else if (msg.type === 'snap_panel')           window.eve.snapPanel(msg.panel, msg.bounds)
+      else if (msg.type === 'identify_monitors')    window.eve.identifyMonitors()
     } catch (_) {}
   }
   ws.onclose = () => setTimeout(connect, 500)

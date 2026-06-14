@@ -163,3 +163,9 @@ def hide_directory() -> str:
     if _display is not None:
         _display.hide_directory()
     return ""
+
+
+def identify_monitors() -> str:
+    if _display is not None:
+        _display.identify_monitors()
+    return ""
