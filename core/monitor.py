@@ -124,3 +124,54 @@ def move_new_window(before: frozenset, target, timeout: float = 8.0):
                 )
             _u32.ShowWindow(hwnd, 3)       # SW_MAXIMIZE — fill monitor regardless of saved state
         return
+
+
+class _WINDOWPLACEMENT(ctypes.Structure):
+    _fields_ = [
+        ('cbSize',           ctypes.wintypes.UINT),
+        ('flags',            ctypes.wintypes.UINT),
+        ('showCmd',          ctypes.wintypes.UINT),
+        ('ptMinPosition',    ctypes.wintypes.POINT),
+        ('ptMaxPosition',    ctypes.wintypes.POINT),
+        ('rcNormalPosition', ctypes.wintypes.RECT),
+    ]
+
+
+def move_new_window_to_rect(before: frozenset, rect, timeout: float = 8.0):
+    """Poll until a new visible window appears, then snap it to *rect*
+    (x, y, w, h) without stealing focus.
+
+    Used by snap-on-open: launch an app and place it directly in a zone.
+
+    The app may launch maximised (Firefox, Chrome) — SetWindowPos is silently
+    ignored on maximised windows, so we restore first.  We retry a few times
+    in case Firefox launches an early splash and resizes its real window late.
+    """
+    deadline = time.monotonic() + timeout
+    x, y, w, h = rect
+    placed    = set()
+
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        new = snapshot_windows() - before - placed
+        if not new:
+            # keep re-asserting on already-placed windows for ~1s after first
+            # placement, since Firefox often resizes itself shortly after.
+            for hwnd in list(placed):
+                _force_to_rect(hwnd, x, y, w, h)
+            continue
+        for hwnd in new:
+            _force_to_rect(hwnd, x, y, w, h)
+            placed.add(hwnd)
+        # don't return immediately — wait one more poll cycle for late resizes
+        if time.monotonic() > deadline - 1.0:
+            return
+
+
+def _force_to_rect(hwnd: int, x: int, y: int, w: int, h: int):
+    wp = _WINDOWPLACEMENT()
+    wp.cbSize = ctypes.sizeof(_WINDOWPLACEMENT)
+    _u32.GetWindowPlacement(hwnd, ctypes.byref(wp))
+    if wp.showCmd == 3:  # SW_SHOWMAXIMIZED — un-maximize first or SetWindowPos is ignored
+        _u32.ShowWindow(hwnd, 4)   # SW_SHOWNOACTIVATE
+    _u32.SetWindowPos(hwnd, None, x, y, w, h, SWP_NOACTIVATE)

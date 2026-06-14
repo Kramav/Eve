@@ -239,13 +239,14 @@ async function saveLayout() {
   if (!d) return
 
   const monitorData = {
-    label:      d.label || `Display ${d.index}`,
-    workX:      d.workX,
-    workY:      d.workY,
-    workWidth:  d.workWidth,
-    workHeight: d.workHeight,
-    layout:     selectedPreset,
-    zones:      PRESETS[selectedPreset].zones,
+    label:       d.label || `Display ${d.index}`,
+    workX:       d.workX,
+    workY:       d.workY,
+    workWidth:   d.workWidth,
+    workHeight:  d.workHeight,
+    scaleFactor: d.scaleFactor || 1.0,
+    layout:      selectedPreset,
+    zones:       PRESETS[selectedPreset].zones,
   }
 
   const result = await window.eve.setTilingLayout(d.id, monitorData)

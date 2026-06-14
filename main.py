@@ -1,6 +1,21 @@
+import ctypes
 import re
 import time
 import threading
+
+# Make Python per-monitor DPI aware BEFORE any Win32 windowing calls.
+# Without this, Python is in legacy DPI-unaware mode and Win32 lies about
+# coordinates on mixed-DPI multi-monitor setups, so tiling_layouts.json
+# values (saved by Electron, which is DPI aware) don't line up with where
+# SetWindowPos actually places windows.
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+except Exception:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except Exception:
+        pass
+
 from core.listener import Listener
 from core.transcriber import Transcriber
 import core.dispatcher as _dispatcher_mod
@@ -12,6 +27,7 @@ from core.session import get as _get_session, Mode as _Mode
 from commands.reminders import start_checker
 import commands.youtube as _yt_cmd
 import commands.system as _sys_cmd
+import commands.tiling as _tiling_cmd
 
 _OVERLAY_TOGGLE = re.compile(
     # Full phrase: "show/hide/close the overlay / hud / log / history"
@@ -66,6 +82,7 @@ def main():
 
     display.set_speaker(speaker)
     display.set_listener(listener)
+    _tiling_cmd.set_display(display)
 
     _yt_cmd.set_display(display)
     _sys_cmd.set_display(display)

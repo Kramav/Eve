@@ -292,6 +292,15 @@ class Display:
         payload = json.dumps({'type': 'close_window_manager'})
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
 
+    def snap_panel(self, panel_id: str, x: int, y: int, w: int, h: int):
+        """Open the given Eve panel and place it at the given screen rect."""
+        payload = json.dumps({
+            'type':   'snap_panel',
+            'panel':  panel_id,
+            'bounds': {'x': int(x), 'y': int(y), 'width': int(w), 'height': int(h)},
+        })
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
     # ── Public API: HUD state (same interface as before) ────────────────────
 
     def show(self, status: str = '', text: str = '', color: str = 'idle'):

@@ -145,3 +145,21 @@ def close_window_manager() -> str:
     if _display is not None:
         _display.close_window_manager()
     return "Closing window manager"
+
+
+def open_voice_settings() -> str:
+    if _display is not None:
+        _display.open_voice_settings()
+    return "Opening voice settings"
+
+
+def show_directory() -> str:
+    if _display is not None:
+        _display.show_directory()
+    return ""
+
+
+def hide_directory() -> str:
+    if _display is not None:
+        _display.hide_directory()
+    return ""

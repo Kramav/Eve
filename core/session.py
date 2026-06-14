@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
+from typing import Any, Callable, Optional, Tuple
 from enum import Enum, auto
-from typing import Optional
 
 
 class Mode(Enum):
@@ -16,6 +16,10 @@ class Session:
     site_list:  list = field(default_factory=list)
     selected_url: Optional[str] = None
     selected_title: Optional[str] = None
+    # Single-turn confirmation: when set, the next utterance is checked for
+    # yes/no. Tuple of (callable, args_tuple, label) — label is shown back
+    # to the user on confirm. Cleared on yes/no/any other utterance.
+    pending_confirm: Optional[Tuple[Callable[..., Any], tuple, str]] = None
 
 
 _session = Session()

@@ -1,4 +1,3 @@
-import difflib
 import json
 import re
 import subprocess
@@ -258,47 +257,133 @@ def _dispatch_playing(text: str):
     return None  # fall through to normal dispatch
 
 
-# Words that speech recognition commonly substitutes for trigger words
+# Words/phrases Whisper commonly substitutes for trigger words.
+# Patterns are matched as whole words (\b) on lowercased text. Order matters:
+# multi-word phrases before single-word ones so they win.
 _MISHEAR_SUBS = [
-    (r'\bin\b',  'open'),   # "in firefox"   → "open firefox"
-    (r'\bam\b',  'open'),   # "am firefox"   → "open firefox"
-    (r'\bon\b',  'open'),   # "on firefox"   → "open firefox"
-    (r'\bat\b',  'app'),    # "at manager"   → "app manager"
-    (r'\band\b', 'open'),   # "and firefox"  → "open firefox"
+    # Multi-word phrases that mean a panel name
+    (r'\bvoice\s+manor\b',          'voice manager'),
+    (r'\bvoice\s+center\b',         'voice settings'),
+    (r'\bvocal\s+settings\b',       'voice settings'),
+    (r'\bvocal\s+manager\b',        'voice manager'),
+    (r'\bcommands?\s+editor\b',     'command editor'),
+    (r'\brooting\s+directory\b',    'routing directory'),
+    (r'\bwriting\s+directory\b',    'routing directory'),
+    (r'\boverlay?\s+directory\b',   'routing directory'),
+
+    # "show me" / "tell me" filler that lures regex away
+    (r'\bshow\s+me\b',              'show'),
+    (r'\btell\s+me\b',              'show'),
+    (r'\bcan\s+you\s+(?:please\s+)?', ''),
+    (r'\bplease\b',                 ''),
+
+    # Common single-word verb mishears
+    (r'\bin\b',                     'open'),
+    (r'\bam\b',                     'open'),
+    (r'\bon\b',                     'open'),
+    (r'\band\b',                    'open'),
+    (r'\bup\b(?!\s+(?:to|by))',     'open'),  # "up firefox" → "open firefox"
+    (r'\bopened\b',                 'open'),
+    (r'\bopens\b',                  'open'),
+    (r'\bopening\b',                'open'),
+    (r'\blaunched\b',               'launch'),
+    (r'\bstarted\b',                'start'),
+
+    # Noun mishears
+    (r'\bat\b(?=\s+manager)',       'app'),     # "at manager" → "app manager"
+    (r'\bhood\b',                   'hud'),     # "hood" → "hud"
+    (r'\bhead\b',                   'hud'),     # "show head" → "show hud"
+    (r'\bhugh\b',                   'hud'),
+    (r'\boverly\b',                 'overlay'),
+    (r'\boverlaid\b',               'overlay'),
+    (r'\boverleaf\b',               'overlay'),
+
+    # YouTube mishears
+    (r'\byou\s+tube\b',             'youtube'),
+    (r'\byou\s+too\b',              'youtube'),
 ]
 
 
-def _guess_dispatch(text: str):
-    """Fuzzy fallback: substitute misheared trigger words then retry intents;
-    fall back to difflib match against known app spoken names."""
-
-    # Pass 1: word substitutions — replace a misheared word and re-run intents
+def _apply_mishear_subs(text: str) -> str:
+    out = text
     for pat, rep in _MISHEAR_SUBS:
-        corrected = re.sub(pat, rep, text)
-        if corrected == text:
-            continue
-        for pattern, handler in INTENTS:
-            m = re.search(pattern, corrected)
-            if m:
-                groups = m.groups()
-                return handler(*groups) if groups else handler()
+        out = re.sub(pat, rep, out)
+    return re.sub(r'\s+', ' ', out).strip()
 
-    # Pass 2: fuzzy match the whole phrase against known app spoken names
-    known = apps._load_apps()   # {spoken_name: exe_path}
-    if known:
-        matches = difflib.get_close_matches(text, known.keys(), n=1, cutoff=0.6)
-        if matches:
-            return apps.open_app(matches[0])
 
-    # Pass 3: prefix retry — prepend "open" and re-run intents
-    # Catches bare names like "firefox", "window manager", "youtube"
-    prefixed = f"open {text}"
+def _try_intents(text: str):
+    """Run text against the INTENTS regex table. Returns response or None."""
     for pattern, handler in INTENTS:
-        m = re.search(pattern, prefixed)
+        m = re.search(pattern, text)
         if m:
             groups = m.groups()
             return handler(*groups) if groups else handler()
+    return None
 
+
+def _guess_dispatch(text: str):
+    """Tiered fuzzy fallback:
+      1. Mishear substitutions, then retry INTENTS.
+      2. Prefix-retry ("open <text>") through INTENTS.
+      3. Phrase-similarity score against the intent catalog:
+            score ≥ HIGH  → execute silently
+            score ≥ MED   → ask "did you mean X?" via pending_confirm
+            score < MED   → no match
+    """
+    from core import intent_match
+    from core.response import Silent
+
+    # 1. mishear-subs then regex retry
+    corrected = _apply_mishear_subs(text)
+    if corrected != text:
+        result = _try_intents(corrected)
+        if result is not None:
+            return result
+
+    # 2. prefix retry — catches bare names: "firefox", "window manager"
+    prefixed = f"open {corrected}"
+    result = _try_intents(prefixed)
+    if result is not None:
+        return result
+
+    # 3. catalog scoring
+    catalog = intent_match.build_catalog()
+    match   = intent_match.best_match(corrected, catalog)
+    if match is None:
+        return None
+    canonical, fn, args, score = match
+
+    if score >= intent_match.HIGH_THRESHOLD:
+        return fn(*args)
+
+    # Medium confidence → store and ask. Next utterance handles yes/no.
+    sess = _sess_mod.get()
+    sess.pending_confirm = (fn, args, canonical)
+    return Silent(f"Did you mean: {canonical}?")
+
+
+# ── Yes/no confirmation handling (single-turn converse) ────────────────────
+_YES_RE = re.compile(r"^(?:yes|yeah|yep|yup|sure|ok(?:ay)?|do it|please|go ahead|confirmed?)\b", re.I)
+_NO_RE  = re.compile(r"^(?:no|nope|nah|cancel|never ?mind|forget it|stop)\b", re.I)
+
+
+def _handle_confirmation(text: str):
+    """Resolve any pending 'did you mean' suggestion. Returns the handler
+    response if the utterance was yes/no, or None to fall through."""
+    from core.response import Silent
+    sess = _sess_mod.get()
+    pending = sess.pending_confirm
+    if pending is None:
+        return None
+    fn, args, canonical = pending
+    if _YES_RE.search(text):
+        sess.pending_confirm = None
+        return fn(*args)
+    if _NO_RE.search(text):
+        sess.pending_confirm = None
+        return Silent("Cancelled")
+    # Any other utterance: clear pending and let it route normally
+    sess.pending_confirm = None
     return None
 
 
@@ -311,6 +396,14 @@ def dispatch(text: str):
         if text.startswith(prefix):
             text = text[len(prefix):].strip(",. ")
             break
+
+    # --- Pending confirmation? ---
+    # If the previous utterance was a medium-confidence guess, this utterance
+    # may be a yes/no answer. _handle_confirmation returns the executed result
+    # on yes, "Cancelled" on no, or None to fall through to normal dispatch.
+    confirmed = _handle_confirmation(text)
+    if confirmed is not None:
+        return confirmed
 
     # --- State-aware routing ---
     sess = _sess_mod.get()

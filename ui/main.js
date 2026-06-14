@@ -286,6 +286,46 @@ ipcMain.on('close-voice-settings', () => {
   if (voiceSettingsWin && !voiceSettingsWin.isDestroyed()) voiceSettingsWin.close()
 })
 
+// ── Snap panel (voice: "snap window manager to top-left") ────────────────────
+
+const _panelGetters = {
+  directory:      () => dirWin,
+  window_manager: () => windowManagerWin,
+  app_manager:    () => appManagerWin,
+  voice_settings: () => voiceSettingsWin,
+}
+
+const _panelOpeners = {
+  directory:      () => showDirectory(),
+  window_manager: () => openWindowManager(),
+  app_manager:    () => openAppManager(),
+  voice_settings: () => openVoiceSettings(),
+}
+
+ipcMain.on('snap-panel', (_, { panel, bounds }) => {
+  const opener = _panelOpeners[panel]
+  const getter = _panelGetters[panel]
+  if (!opener || !getter) return
+
+  // Make sure the panel exists and is visible
+  const existing = getter()
+  if (!existing || existing.isDestroyed() || !existing.isVisible()) opener()
+
+  const place = () => {
+    const win = getter()
+    if (!win || win.isDestroyed()) return
+    win.setBounds(bounds, true)
+    win.show()
+    if (panel === 'directory') {
+      // dirWin is transparent/topmost — re-assert after move so it stays on top
+      win.setAlwaysOnTop(true, 'screen-saver', 1)
+      win.moveTop()
+    }
+  }
+  // Wait one tick so any just-created BrowserWindow finishes its initial setBounds
+  setTimeout(place, 50)
+})
+
 ipcMain.handle('get-voice-settings', () => {
   let s = {}
   try { s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) } catch {}

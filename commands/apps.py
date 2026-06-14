@@ -55,7 +55,9 @@ def _load_apps() -> dict:
         return {}
 
 
-def open_app(name: str) -> str:
+def open_app(name: str, snap_rect: tuple | None = None) -> str:
+    """Launch an app. If *snap_rect* is provided (x, y, w, h in screen pixels),
+    the new window is snapped there instead of centred on a free monitor."""
     name = name.strip()
     apps = _load_apps()
     cmd = apps.get(name.lower())
@@ -67,14 +69,21 @@ def open_app(name: str) -> str:
     try:
         from core import monitor
         before = monitor.snapshot_windows(min_size=0)  # include compact overlay so it's never misidentified as new
-        target = monitor.get_target_monitor()
         # SW_SHOWNOACTIVATE = 4: OS-level hint to open without stealing focus
         ctypes.windll.shell32.ShellExecuteW(None, "open", cmd, None, None, 4)
-        threading.Thread(
-            target=monitor.move_new_window,
-            args=(before, target),
-            daemon=True,
-        ).start()
+        if snap_rect is not None:
+            threading.Thread(
+                target=monitor.move_new_window_to_rect,
+                args=(before, snap_rect),
+                daemon=True,
+            ).start()
+        else:
+            target = monitor.get_target_monitor()
+            threading.Thread(
+                target=monitor.move_new_window,
+                args=(before, target),
+                daemon=True,
+            ).start()
         return f"Opening {name}"
     except Exception:
         return f"Couldn't open {name}"
