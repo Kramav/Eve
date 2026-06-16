@@ -21,6 +21,8 @@ from pathlib import Path
 # All messages include a "type" field so multiple windows (overlay, app manager)
 # can filter for the messages they care about.
 
+from core import features as _features
+
 WS_PORT        = 7734
 APPS_FILE      = Path(__file__).parent.parent / 'apps.json'
 SETTINGS_FILE  = Path(__file__).parent.parent / 'settings.json'
@@ -87,6 +89,8 @@ class Display:
             s = dict(self._state)
             s['type']                  = 'state'
             s['log_entries']           = list(self._state['log_entries'])
+            s['features']              = _features.all_features()
+            s['feature_labels']        = _features.LABELS
             self._state['log_entries'] = []
             return json.dumps(s)
 
@@ -132,6 +136,11 @@ class Display:
             with self._lock:
                 cur = self._state['listener_enabled']
             self.set_listener_enabled(not cur)
+        elif action == 'toggle_feature':
+            key = data.get('key')
+            if key and key in _features.DEFAULTS:
+                _features.set_feature(key, not _features.get(key))
+                self._broadcast()
         elif action == 'get_voices':
             from core.speaker import list_voices
             await self._push_one(ws, json.dumps({

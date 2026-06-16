@@ -4,21 +4,12 @@ A fully local, free Windows voice assistant. No cloud, no API keys. Wake word de
 
 ---
 
-## Requirements
+## System Requirements
 
 - **Windows 10/11**
-- **Python 3.10+**
-- **[mpv](https://mpv.io/installation/)** — media player used for YouTube playback
-- **[yt-dlp](https://github.com/yt-dlp/yt-dlp/releases)** — YouTube search and streaming (also used by mpv)
-- **Firefox** — opened by the `open firefox` command like any other app (not used for YouTube)
-
-> **mpv and yt-dlp must both be on your PATH.** The easiest way is to drop their executables into a folder that's already in PATH (e.g. `C:\Windows\System32`) or add their folder to PATH in System Settings.
-
-Verify before running Eve:
-```
-mpv --version
-yt-dlp --version
-```
+- **Python 3.14** (other versions untested)
+- **Node.js 18+** — required to run the Electron UI
+- **[mpv](https://mpv.io/installation/)** — media player used for YouTube playback (must be on PATH)
 
 ---
 
@@ -26,58 +17,79 @@ yt-dlp --version
 
 ### 1. Install Python packages
 
-```
-pip install -r requirements.txt
+```powershell
+python -m pip install -r requirements.txt
 ```
 
-### 2. Download wake word models
+> Note: always use `python -m pip install`, not `python pip install`.
 
+### 2. Install the piper-tts voice model
+
+`piper-tts` is the TTS engine. It needs a voice model file separate from the pip package.
+
+**a) Install the package:**
+```powershell
+python -m pip install piper-tts
 ```
+
+**b) Download a voice model** from [https://huggingface.co/rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices)
+
+The default voice is `en_US-lessac-medium`. Download both files:
+- `en_US-lessac-medium.onnx`
+- `en_US-lessac-medium.onnx.json`
+
+Place them in `models/voices/` (create the folder if it doesn't exist):
+```
+Eve/
+  models/
+    voices/
+      en_US-lessac-medium.onnx
+      en_US-lessac-medium.onnx.json
+```
+
+To use a different voice, update `TTS_DEFAULT_VOICE` in `config.py` to match the model filename stem.
+
+### 3. Download wake word models
+
+```powershell
 python -c "import openwakeword; openwakeword.utils.download_models()"
 ```
 
-This downloads the pre-trained wake word models (including `hey_jarvis`) into the openwakeword package directory. Only needs to be done once.
+Downloads pre-trained wake word models (including `hey_jarvis`) into the openwakeword package directory. Only needed once.
 
-**Optional — train a custom "Hey Eve" wake word:**
-openwakeword supports training custom wake words. To use "Hey Eve" instead of "Hey Jarvis", follow the [openwakeword training guide](https://github.com/dscripka/openWakeWord/blob/main/docs/training.md) to generate a `.onnx` model, then update `WAKE_WORD` in `config.py` to match your model's filename (without the `.onnx` extension).
+### 4. Install mpv
 
-### 3. Install mpv
-
-**Easiest — one command (Windows 10/11 built-in package manager):**
-
-```
+```powershell
 winget install mpv
 ```
 
-Restart your terminal after so the PATH update takes effect.
+Restart your terminal after installation. Verify: `mpv --version`
 
-**If winget doesn't add mpv to PATH automatically** (installs to `C:\Program Files\MPV Player\`):
-
+If winget doesn't add mpv to PATH automatically:
 ```powershell
 $old = [Environment]::GetEnvironmentVariable("PATH", "User")
 [Environment]::SetEnvironmentVariable("PATH", "$old;C:\Program Files\MPV Player", "User")
 ```
 
-Restart your terminal, then verify: `mpv --version`
+### 5. Install Electron (UI)
 
-### 4. Install yt-dlp
-
+```powershell
+cd ui
+npm install
+cd ..
 ```
-pip install yt-dlp
-```
 
-Or download the standalone `yt-dlp.exe` from the [releases page](https://github.com/yt-dlp/yt-dlp/releases) and place it on your PATH.
+This installs Electron into `ui/node_modules/`. Only needed once.
 
-### 5. Add your apps (optional)
+### 6. Configure your apps (optional)
 
-Create `apps.json` in the Eve folder to teach Eve which apps to open. Each entry is `["spoken name", "path or command"]`:
+`apps.json` in the Eve folder tells Eve which apps to launch by voice. You can manage this through the **App Manager** UI (say `open app manager`) or edit the file directly:
 
 ```json
 [
-  ["firefox", "C:\\Program Files\\Mozilla Firefox\\firefox.exe"],
-  ["spotify", "C:\\Users\\YOU\\AppData\\Roaming\\Spotify\\Spotify.exe"],
-  ["vs code", "C:\\Users\\YOU\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe"],
-  ["notepad", "notepad.exe"]
+  {"name": "Firefox", "path": "C:\\Program Files\\Mozilla Firefox\\firefox.exe", "spoken": "firefox"},
+  {"name": "Spotify",  "path": "C:\\Users\\YOU\\AppData\\Roaming\\Spotify\\Spotify.exe", "spoken": "spotify"},
+  {"name": "VS Code",  "path": "C:\\Users\\YOU\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe", "spoken": "vs code"}
 ]
 ```
 
@@ -85,11 +97,38 @@ Create `apps.json` in the Eve folder to teach Eve which apps to open. Each entry
 
 ## Running Eve
 
-```
+```powershell
 python main.py
 ```
 
 Say **"Hey Jarvis"** to wake Eve up, then speak your command.
+
+The **Routing Directory** window opens automatically — this is the main control panel. The small orb in the top-right corner is the always-visible status indicator.
+
+---
+
+## UI Overview
+
+### Orb (top-right corner)
+Always-visible animated circle that shows Eve's current state by color and animation. Click it to open/close the Routing Directory.
+
+### Routing Directory
+The main control panel. Opens automatically on launch. Contains:
+- **Module tiles** — quick access to App Manager, Window Manager, Command Editor, Voice Settings
+- **Feature toggles** — enable/disable individual capabilities (TTS, YouTube, Web Search, Reminders, App Launcher, Window Tiling)
+- **Activity feed** — live log of everything Eve hears and does
+
+### App Manager
+Discover installed apps on your system and configure which ones Eve can launch by voice. Opens via the Routing Directory or by saying `open app manager`.
+
+### Window Manager
+Visual layout manager for snapping windows to zones. Opens via the Routing Directory or by saying `open window manager`.
+
+### Voice Settings
+Configure TTS voice, speed, and other audio parameters. Opens via the Routing Directory or by saying `open voice settings`.
+
+### Command Editor
+Add custom voice commands and aliases via a GUI. Opens via the Routing Directory, by saying `open command editor`, or by running `python editor.py`.
 
 ---
 
@@ -100,26 +139,46 @@ Say **"Hey Jarvis"** to wake Eve up, then speak your command.
 | Say | Action |
 |-----|--------|
 | `play lo-fi music` | Search YouTube and show top 5 results |
-| `search youtube for cooking` | Same — explicit YouTube search |
+| `search youtube for cooking` | Explicit YouTube search |
 | `play number 2` / `play the third one` | Play a result from the list |
+| `browse youtube` / `open youtube` | Open youtube.com in browser |
 | `pause` / `resume` | Toggle playback |
 | `skip ahead` / `go back` | Jump ±10 seconds |
-| `skip 30 seconds` | Jump a specific amount |
-| `go back 15 seconds` | Rewind a specific amount |
+| `skip 30 seconds` / `go back 15 seconds` | Jump a specific amount |
 | `mute` / `unmute` | Toggle mute |
 | `fullscreen` | Toggle fullscreen |
-| `close youtube` | Stop playback and clear the overlay thumbnail |
-| `youtube` / `browse youtube` | Open youtube.com in your browser |
+| `next video` | Skip to next result |
+| `show list` / `back to list` | Return to the results list |
+| `close youtube` | Stop playback |
 
-YouTube plays in a small **mpv** window that appears in the bottom-right corner of your screen. Playback control works without the window having focus — you can type, browse, or do anything else while audio/video plays.
+YouTube plays in mpv. Playback control works without the window having focus.
 
 ### Apps
 
 | Say | Action |
 |-----|--------|
-| `open firefox` | Launch an app from apps.json |
-| `open spotify` | Launch an app from apps.json |
-| `close chrome` | Kill a running app by name |
+| `open firefox` | Launch an app configured in apps.json |
+| `close chrome` | Gracefully close a running app |
+| `kill chrome` | Force-terminate a running app |
+
+### Window Tiling
+
+| Say | Action |
+|-----|--------|
+| `snap firefox to left` | Snap an app to a named zone |
+| `move chrome to top-right` | Move an app to a zone |
+| `send notepad to bottom` | Send an app to a zone |
+
+Zones are defined in `tiling_layouts.json` and configured via the Window Manager.
+
+### Web
+
+| Say | Action |
+|-----|--------|
+| `search for python tutorials` | Google search — shows result list |
+| `go to github.com` | Open a URL directly |
+| `open the first one` / `go to 2` | Navigate to a search result |
+| `open the wikipedia one` | Navigate by keyword |
 
 ### System
 
@@ -129,10 +188,12 @@ YouTube plays in a small **mpv** window that appears in the bottom-right corner 
 | `what's the date` | Read today's date |
 | `volume up` / `volume down` | Adjust system volume |
 | `mute` / `unmute` | Toggle system mute |
+| `pause` / `play` / `resume` | Media play/pause |
+| `next song` / `previous song` | Media next/prev track |
 | `take a screenshot` | Save screenshot to desktop |
+| `sleep` | Put the PC to sleep |
 | `shut down` | Shutdown in 30 seconds |
 | `cancel shutdown` | Abort a pending shutdown |
-| `sleep` | Put the PC to sleep |
 
 ### Reminders
 
@@ -143,23 +204,26 @@ YouTube plays in a small **mpv** window that appears in the bottom-right corner 
 | `what are my reminders` | List pending reminders |
 | `cancel reminders` | Cancel all reminders |
 
-### Web
+### Visual Overlay / HUD
 
 | Say | Action |
 |-----|--------|
-| `search for python tutorials` | Google search |
-| `go to github.com` | Open a URL directly |
+| `show overlay` / `hide overlay` | Toggle the HUD panel |
+| `show hud` / `close hud` | Same |
+| `show log` / `hide log` | Same |
+| `open routing directory` | Open the Routing Directory window |
+| `open app manager` | Open the App Manager |
+| `open window manager` | Open the Window Manager |
+| `open voice settings` | Open Voice Settings |
+| `open command editor` | Open the Command Editor |
 
-### Visual Overlay
+### TTS Control
 
 | Say | Action |
 |-----|--------|
-| `show overlay` / `open overlay` | Show the HUD panel |
-| `hide overlay` / `close overlay` | Hide the HUD panel |
-| `overlay` / `overlay on` / `overlay off` | Toggle the HUD panel |
-| `show log` / `hide log` | Alias for the above |
-
-The overlay shows the current mode (IDLE / LISTENING / THINKING / PLAYING), a live activity feed, and a YouTube thumbnail when a video is playing. It's draggable — grab the header to reposition it.
+| `silence` / `mute eve` / `disable tts` | Stop Eve from speaking |
+| `enable voice` / `unmute eve` | Re-enable speech |
+| `toggle voice` | Toggle TTS on/off |
 
 ---
 
@@ -171,16 +235,68 @@ Edit `config.py` to adjust core settings:
 |---------|---------|-------------|
 | `WAKE_WORD` | `hey_jarvis` | Pre-trained wake word model name |
 | `WHISPER_MODEL` | `small.en` | STT model: `tiny.en` (fastest) → `small.en` (most accurate) |
-| `TTS_RATE` | `175` | Speech rate in words per minute |
-| `SILENCE_THRESHOLD` | `400` | Mic amplitude treated as silence (0–32768) |
+| `TTS_DEFAULT_VOICE` | `en_US-lessac-medium` | Voice model filename stem (without `.onnx`) |
+| `TTS_SPEED` | `1.0` | Speech rate multiplier (0.8 = slower, 1.2 = faster) |
+| `SILENCE_THRESHOLD` | `800` | Mic amplitude treated as silence (0–32768); raise if recording runs long |
 | `SILENCE_DURATION_S` | `1.5` | Seconds of silence before recording stops |
+
+### Feature toggles
+
+Individual capabilities can be toggled at runtime from the **Routing Directory** without restarting Eve. Toggles are saved to `features.json` and persist across restarts:
+
+- **Text-to-Speech** — disable if you want silent responses
+- **YouTube** — disable to free up processing / avoid media commands
+- **Web Search** — disable to prevent web lookups
+- **Reminders & Timers** — disable if unused
+- **App Launcher** — disable if unused
+- **Window Tiling** — disable if unused
 
 ### Custom commands
 
-Say `"open command editor"` or run `python editor.py` to add custom voice commands and aliases through a GUI.
+Say `"open command editor"` to add custom voice triggers that run any shell command, and aliases that map phrases to built-in actions.
 
 ---
 
 ## Hot reload
 
-Command files (`commands/apps.py`, `commands/system.py`, etc.) and `core/dispatcher.py` are watched for changes while Eve runs. Save a file and the new logic takes effect immediately — no restart needed.
+Command files in `commands/` and `core/dispatcher.py` are watched for changes while Eve runs. Save a file and the new logic takes effect immediately — no restart needed.
+
+---
+
+## Project structure
+
+```
+Eve/
+├── main.py                  # Entry point
+├── config.py                # Core settings
+├── features.json            # Feature toggle state (auto-created)
+├── apps.json                # App launcher config
+├── tiling_layouts.json      # Window tiling zone definitions
+├── settings.json            # Voice/UI settings
+├── requirements.txt         # Python dependencies
+├── commands/                # Voice command handlers
+│   ├── apps.py
+│   ├── search.py
+│   ├── system.py
+│   ├── tiling.py
+│   ├── reminders.py
+│   └── youtube.py
+├── core/                    # Core infrastructure
+│   ├── dispatcher.py        # Intent routing
+│   ├── display.py           # WebSocket server + state broadcast
+│   ├── features.py          # Feature toggle management
+│   ├── listener.py          # Wake word + audio recording
+│   ├── transcriber.py       # Whisper STT
+│   ├── speaker.py           # Piper TTS
+│   └── session.py           # Conversation state
+├── models/
+│   └── voices/              # Piper .onnx voice model files go here
+└── ui/                      # Electron frontend
+    ├── main.js
+    ├── preload.js
+    ├── package.json
+    └── src/
+        ├── index.html       # Orb overlay
+        ├── directory/       # Routing Directory window
+        └── app-manager/     # App Manager window
+```

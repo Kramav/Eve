@@ -114,7 +114,49 @@ function applyState(s) {
     prev.listKey = listKey
   }
 
+  if (s.features) renderFeatures(s.features, s.feature_labels || {})
+
   prev = { mode: s.mode, status_text: s.status_text, main_text: s.main_text, listKey: prev.listKey, enabled: enabled }
+}
+
+// ── Feature toggles ──────────────────────────────────────────────────────────
+let _featureState = {}
+
+function renderFeatures(features, labels) {
+  const list = document.getElementById('feature-list')
+  const keys = Object.keys(features)
+
+  // First render: build rows
+  if (list.children.length !== keys.length) {
+    list.innerHTML = ''
+    for (const key of keys) {
+      const row    = document.createElement('div')
+      row.className = 'feature-row'
+      row.dataset.key = key
+
+      const lbl  = document.createElement('span')
+      lbl.className = 'feature-label'
+      lbl.textContent = labels[key] || key
+
+      const tog  = document.createElement('button')
+      tog.className = 'feature-toggle'
+      tog.addEventListener('click', () => send('toggle_feature', { key }))
+
+      row.append(lbl, tog)
+      list.appendChild(row)
+    }
+  }
+
+  // Update toggle state
+  for (const key of keys) {
+    if (_featureState[key] === features[key]) continue
+    _featureState[key] = features[key]
+    const row = list.querySelector(`[data-key="${key}"]`)
+    if (!row) continue
+    const tog = row.querySelector('.feature-toggle')
+    tog.textContent  = features[key] ? 'ON' : 'OFF'
+    tog.className    = `feature-toggle ${features[key] ? 'on' : 'off'}`
+  }
 }
 
 function appendEntry(e) {

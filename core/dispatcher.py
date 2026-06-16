@@ -5,6 +5,7 @@ from pathlib import Path
 from commands import apps, system, search, reminders, youtube, tiling
 import core.session as _sess_mod
 from core.session import Mode
+from core import features as _features
 
 _COMMANDS_FILE = Path(__file__).parent.parent / "custom_commands.json"
 _ALIASES_FILE  = Path(__file__).parent.parent / "aliases.json"
@@ -134,6 +135,22 @@ INTENTS = [
     (r"(?:shut down|shutdown|turn off)(?: the computer)?",       system.shutdown),
     (r"(?:go to )?sleep",                                        system.sleep_pc),
 ]
+
+# Maps handler → feature key so disabled features are silently skipped
+_HANDLER_FEATURE = {
+    youtube.browse_home_intent: 'youtube',
+    youtube.play_query_intent:  'youtube',
+    search.go_to_site:          'web_search',
+    search.web_search_list:     'web_search',
+    reminders.set_reminder:     'reminders',
+    reminders.set_timer:        'reminders',
+    reminders.list_reminders:   'reminders',
+    reminders.cancel_all:       'reminders',
+    apps.open_app:              'apps',
+    apps.close_app:             'apps',
+    apps.kill_app:              'apps',
+    tiling.snap_app:            'tiling',
+}
 
 _WAKE_PREFIXES = ("hey jarvis", "hey eve", "jarvis", "eve")
 
@@ -321,6 +338,9 @@ def _try_intents(text: str):
     for pattern, handler in INTENTS:
         m = re.search(pattern, text)
         if m:
+            feat = _HANDLER_FEATURE.get(handler)
+            if feat and not _features.get(feat):
+                continue
             groups = m.groups()
             return handler(*groups) if groups else handler()
     return None
@@ -412,11 +432,11 @@ def dispatch(text: str):
 
     # --- State-aware routing ---
     sess = _sess_mod.get()
-    if sess.mode == Mode.LISTING:
+    if sess.mode == Mode.LISTING and _features.get('youtube'):
         result = _dispatch_listing(text)
         if result is not None:
             return result
-    elif sess.mode == Mode.PLAYING:
+    elif sess.mode == Mode.PLAYING and _features.get('youtube'):
         result = _dispatch_playing(text)
         if result is not None:
             return result
