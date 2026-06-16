@@ -221,7 +221,19 @@ body.offline .state-label { color: var(--red); }
   border-color: rgba(255, 80, 80, 0.25);
   color: var(--red);
 }
-.feature-toggle:hover { opacity: 0.75; }
+.feature-toggle.unavailable {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--dim);
+  cursor: not-allowed;
+  font-size: 8px;
+  letter-spacing: 1.5px;
+}
+.feature-toggle:not(.unavailable):hover { opacity: 0.75; }
+
+.feature-row-unavailable .feature-label {
+  color: var(--dim);
+}
 
 /* ── Status strip ────────────────────────────────────────────────────── */
 .status-strip {

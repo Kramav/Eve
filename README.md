@@ -15,30 +15,64 @@ A fully local, free Windows voice assistant. No cloud, no API keys. Wake word de
 
 ## Installation
 
-### 1. Install Python packages
+### Option A — Automated (recommended)
+
+#### 1. Install prerequisites
+
+- **Python 3.11+** — [python.org](https://www.python.org/downloads/)
+- **Node.js 18+** — [nodejs.org](https://nodejs.org/) (needed for the Electron UI)
+- **mpv** — YouTube playback: `winget install mpv`, then restart your terminal
+
+#### 2. Run setup
+
+```powershell
+python setup.py
+```
+
+This handles everything else automatically: Python packages, wake word models, the Piper TTS voice model, and Electron. Re-running is safe — all steps check before acting.
+
+---
+
+### Option B — Manual
+
+Follow these steps if you prefer not to use the setup script, or if something in the automated setup fails.
+
+#### 1. Install prerequisites
+
+- **Python 3.11+** — [python.org](https://www.python.org/downloads/)
+- **Node.js 18+** — [nodejs.org](https://nodejs.org/)
+- **mpv** — `winget install mpv` (restart terminal after)
+
+#### 2. Install Python packages
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-> Note: always use `python -m pip install`, not `python pip install`.
+> Always use `python -m pip install`, not `python pip install`.
 
-### 2. Install the piper-tts voice model
+#### 3. Download wake word models
 
-`piper-tts` is the TTS engine. It needs a voice model file separate from the pip package.
-
-**a) Install the package:**
 ```powershell
-python -m pip install piper-tts
+python -c "import openwakeword; openwakeword.utils.download_models()"
 ```
 
-**b) Download a voice model** from [https://huggingface.co/rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices)
+Downloads the pre-trained wake word models (including `hey_jarvis`) into the openwakeword package directory. Only needed once.
 
-The default voice is `en_US-lessac-medium`. Download both files:
-- `en_US-lessac-medium.onnx`
+#### 4. Download the Piper TTS voice model
+
+The default voice is `en_US-lessac-medium`. Download both files from [huggingface.co/rhasspy/piper-voices](https://huggingface.co/rhasspy/piper-voices):
+
+- `en_US-lessac-medium.onnx` (~63 MB)
 - `en_US-lessac-medium.onnx.json`
 
-Place them in `models/voices/` (create the folder if it doesn't exist):
+Direct links:
+```
+https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx
+https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+```
+
+Place both files in `models/voices/` (create the folder if it doesn't exist):
 ```
 Eve/
   models/
@@ -47,31 +81,9 @@ Eve/
       en_US-lessac-medium.onnx.json
 ```
 
-To use a different voice, update `TTS_DEFAULT_VOICE` in `config.py` to match the model filename stem.
+To use a different voice, update `TTS_DEFAULT_VOICE` in `config.py` to match the model filename stem and download that model instead.
 
-### 3. Download wake word models
-
-```powershell
-python -c "import openwakeword; openwakeword.utils.download_models()"
-```
-
-Downloads pre-trained wake word models (including `hey_jarvis`) into the openwakeword package directory. Only needed once.
-
-### 4. Install mpv
-
-```powershell
-winget install mpv
-```
-
-Restart your terminal after installation. Verify: `mpv --version`
-
-If winget doesn't add mpv to PATH automatically:
-```powershell
-$old = [Environment]::GetEnvironmentVariable("PATH", "User")
-[Environment]::SetEnvironmentVariable("PATH", "$old;C:\Program Files\MPV Player", "User")
-```
-
-### 5. Install Electron (UI)
+#### 5. Install Electron
 
 ```powershell
 cd ui
@@ -79,9 +91,30 @@ npm install
 cd ..
 ```
 
-This installs Electron into `ui/node_modules/`. Only needed once.
+#### 6. Create default config files
 
-### 6. Configure your apps (optional)
+Create `features.json` in the Eve root folder:
+
+```json
+{
+  "tts": true,
+  "youtube": true,
+  "web_search": true,
+  "reminders": true,
+  "apps": true,
+  "tiling": true
+}
+```
+
+Create `apps.json` in the Eve root folder (can be empty to start):
+
+```json
+[]
+```
+
+---
+
+### 3. Configure your apps (optional)
 
 `apps.json` in the Eve folder tells Eve which apps to launch by voice. You can manage this through the **App Manager** UI (say `open app manager`) or edit the file directly:
 

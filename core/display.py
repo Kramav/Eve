@@ -90,7 +90,13 @@ class Display:
             s['type']                  = 'state'
             s['log_entries']           = list(self._state['log_entries'])
             s['features']              = _features.all_features()
+            s['feature_status']        = _features.all_status()
             s['feature_labels']        = _features.LABELS
+            s['feature_reasons']       = {
+                k: _features.unavailable_reason(k)
+                for k, v in _features.all_status().items()
+                if v == 'unavailable'
+            }
             self._state['log_entries'] = []
             return json.dumps(s)
 
@@ -139,8 +145,13 @@ class Display:
         elif action == 'toggle_feature':
             key = data.get('key')
             if key and key in _features.DEFAULTS:
-                _features.set_feature(key, not _features.get(key))
+                # Only allow toggling features that are available
+                if _features.get_status(key) == 'ok':
+                    _features.set_feature(key, not _features.all_features()[key])
                 self._broadcast()
+        elif action == 'refresh_status':
+            _features.refresh_status()
+            self._broadcast()
         elif action == 'get_voices':
             from core.speaker import list_voices
             await self._push_one(ws, json.dumps({
