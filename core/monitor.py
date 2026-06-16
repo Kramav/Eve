@@ -7,7 +7,38 @@ import ctypes
 import ctypes.wintypes
 import time
 
-_u32 = ctypes.windll.user32
+_u32    = ctypes.windll.user32
+_dwmapi = ctypes.windll.dwmapi
+
+_DWMWA_EXTENDED_FRAME_BOUNDS = 9
+
+
+def get_dwm_margins(hwnd: int) -> tuple[int, int, int, int]:
+    """Return (left, top, right, bottom) gap between the visible content of a
+    DWM-composited window and its `GetWindowRect` bounds.
+
+    On Win10/11, modern windows have an invisible margin (~7px) on three sides
+    that's part of the drop-shadow / resize-hit-test area. SetWindowPos sets
+    the *window* rect including this margin, which makes a "snapped" window
+    appear narrower than its target zone. Adding these margins to the placement
+    rect compensates so the *visible* content fills the zone."""
+    win_rect = ctypes.wintypes.RECT()
+    _u32.GetWindowRect(hwnd, ctypes.byref(win_rect))
+    vis_rect = ctypes.wintypes.RECT()
+    hr = _dwmapi.DwmGetWindowAttribute(
+        ctypes.wintypes.HWND(hwnd),
+        ctypes.wintypes.DWORD(_DWMWA_EXTENDED_FRAME_BOUNDS),
+        ctypes.byref(vis_rect),
+        ctypes.sizeof(vis_rect),
+    )
+    if hr != 0:
+        return 0, 0, 0, 0
+    return (
+        vis_rect.left   - win_rect.left,    # left  gap
+        vis_rect.top    - win_rect.top,     # top   gap (usually 0)
+        win_rect.right  - vis_rect.right,   # right gap
+        win_rect.bottom - vis_rect.bottom,  # bottom gap
+    )
 
 
 class _MONITORINFO(ctypes.Structure):
@@ -35,7 +66,37 @@ _WNDENUMPROC = ctypes.WINFUNCTYPE(
 SWP_NOSIZE     = 0x0001
 SWP_NOMOVE     = 0x0002
 SWP_NOACTIVATE = 0x0010
-HWND_BOTTOM    = 1   # place behind all other windows
+HWND_BOTTOM    = 1    # place behind all other windows
+HWND_TOPMOST   = -1
+HWND_NOTOPMOST = -2
+
+
+def enumerate_work_areas() -> list[dict]:
+    """Return every connected monitor's physical-pixel work-area rect.
+
+    In a per-monitor-DPI-aware process (which main.py sets at startup),
+    `EnumDisplayMonitors` reports each monitor's true physical bounds in
+    the desktop virtual-screen coordinate system. Unlike Electron's
+    DIP-based `screen.getAllDisplays()`, these values are directly usable
+    with `SetWindowPos` and remain consistent across mixed-DPI setups.
+    """
+    out = []
+
+    def _cb(hMon, *_):
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        if _u32.GetMonitorInfoW(hMon, ctypes.byref(info)):
+            r = info.rcWork
+            out.append({
+                'x': r.left, 'y': r.top,
+                'w': r.right - r.left,
+                'h': r.bottom - r.top,
+                'is_primary': bool(info.dwFlags & 1),  # MONITORINFOF_PRIMARY
+            })
+        return True
+
+    _u32.EnumDisplayMonitors(None, None, _MONITORENUMPROC(_cb), 0)
+    return out
 
 
 def get_target_monitor():
@@ -174,4 +235,11 @@ def _force_to_rect(hwnd: int, x: int, y: int, w: int, h: int):
     _u32.GetWindowPlacement(hwnd, ctypes.byref(wp))
     if wp.showCmd == 3:  # SW_SHOWMAXIMIZED — un-maximize first or SetWindowPos is ignored
         _u32.ShowWindow(hwnd, 4)   # SW_SHOWNOACTIVATE
-    _u32.SetWindowPos(hwnd, None, x, y, w, h, SWP_NOACTIVATE)
+    # Expand the placement rect by DWM invisible borders so the *visible*
+    # window fills the zone exactly. ml, mt, mr, mb are typically 7/0/7/7 on
+    # Win10/11 modern apps and 0/0/0/0 for legacy windows.
+    ml, mt, mr, mb = get_dwm_margins(hwnd)
+    _u32.SetWindowPos(hwnd, None, x - ml, y - mt, w + ml + mr, h + mt + mb, SWP_NOACTIVATE)
+    # Bring to top of regular z-order without stealing focus.
+    from core.window_ops import raise_to_top_no_focus
+    raise_to_top_no_focus(hwnd)

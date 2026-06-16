@@ -1,15 +1,21 @@
-const { app, BrowserWindow, ipcMain, screen, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, nativeImage } = require('electron')
 const fs   = require('fs')
 const path = require('path')
 
-const SETTINGS_FILE = path.join(__dirname, '..', 'settings.json')
-const TILING_FILE   = path.join(__dirname, '..', 'tiling_layouts.json')
+const SETTINGS_FILE  = path.join(__dirname, '..', 'settings.json')
+const TILING_FILE    = path.join(__dirname, '..', 'tiling_layouts.json')
+const COMMANDS_FILE  = path.join(__dirname, '..', 'custom_commands.json')
+const APPS_FILE      = path.join(__dirname, '..', 'apps.json')
+const ALIASES_FILE   = path.join(__dirname, '..', 'aliases.json')
 
-let orbWin           = null
-let dirWin           = null
-let appManagerWin    = null
-let windowManagerWin = null
-let voiceSettingsWin = null
+let orbWin            = null
+let dirWin            = null
+let appManagerWin     = null
+let windowManagerWin  = null
+let voiceSettingsWin  = null
+let commandEditorWin  = null
+let programsWin       = null
+let memoryWin         = null
 let tray             = null
 let _savedDirBounds  = null
 
@@ -36,16 +42,52 @@ function getOrbDisplay() {
   return screen.getPrimaryDisplay()
 }
 
+const ORB_SIZE = 96
+const ORB_MARGIN = 10
+const DIR_W = 700, DIR_H = 520
+const DIR_GAP = 10  // gap between orb and directory
+
+function getOrbCorner() {
+  const { overlayCorner } = loadSettings()
+  const valid = ['top-right', 'top-left', 'bottom-right', 'bottom-left']
+  return valid.includes(overlayCorner) ? overlayCorner : 'top-right'
+}
+
+// Returns { orbX, orbY, dirX, dirY } anchored at the corner of the current
+// HUD-monitor's full bounds (not work area — orb sits over taskbar too).
+function computeCornerLayout() {
+  const corner = getOrbCorner()
+  const { x, y, width, height } = getOrbDisplay().bounds
+  const [v, h] = corner.split('-')
+
+  const orbX = h === 'right'
+    ? x + width  - ORB_SIZE - ORB_MARGIN
+    : x + ORB_MARGIN
+  const orbY = v === 'bottom'
+    ? y + height - ORB_SIZE - ORB_MARGIN
+    : y + ORB_MARGIN
+
+  const dirX = h === 'right'
+    ? x + width  - DIR_W - ORB_MARGIN
+    : x + ORB_MARGIN
+  // For top corners directory sits BELOW the orb; for bottom corners ABOVE.
+  const dirY = v === 'bottom'
+    ? orbY - DIR_H - DIR_GAP
+    : orbY + ORB_SIZE + DIR_GAP
+
+  return { orbX, orbY, dirX, dirY }
+}
+
 function positionOrb() {
   if (!orbWin || orbWin.isDestroyed()) return
-  const { x, y, width } = getOrbDisplay().bounds
-  orbWin.setPosition(x + width - 96 - 10, y + 10)
+  const { orbX, orbY } = computeCornerLayout()
+  orbWin.setPosition(orbX, orbY)
 }
 
 function positionDirectory() {
   if (!dirWin || dirWin.isDestroyed()) return
-  const { x, y, width } = getOrbDisplay().bounds
-  dirWin.setPosition(x + width - 700 - 10, y + 116)  // below orb: 96 + 10 + 10
+  const { dirX, dirY } = computeCornerLayout()
+  dirWin.setPosition(dirX, dirY)
 }
 
 // ── Tray icon (programmatic 16×16 blue circle) ────────────────────────────────
@@ -136,8 +178,8 @@ function showDirectory() {
   if (!dirWin || dirWin.isDestroyed()) createDirWin()
   dirWin._expanded = false
   _savedDirBounds  = null
-  const { x, y, width } = getOrbDisplay().bounds
-  dirWin.setBounds({ x: x + width - 700 - 10, y: y + 116, width: 700, height: 520 })
+  const { dirX, dirY } = computeCornerLayout()
+  dirWin.setBounds({ x: dirX, y: dirY, width: DIR_W, height: DIR_H })
   const present = () => {
     // Pre-assert topmost so the OS orders the window above the fullscreen app
     // at the moment show() takes effect, not after.
@@ -179,8 +221,8 @@ ipcMain.on('toggle-directory-size', () => {
       dirWin.setBounds(_savedDirBounds)
       _savedDirBounds = null
     } else {
-      const { x, y, width } = getOrbDisplay().bounds
-      dirWin.setBounds({ x: x + width - 700 - 10, y: y + 116, width: 700, height: 520 })
+      const { dirX, dirY } = computeCornerLayout()
+      dirWin.setBounds({ x: dirX, y: dirY, width: DIR_W, height: DIR_H })
     }
   } else {
     _savedDirBounds  = dirWin.getBounds()
@@ -202,7 +244,29 @@ ipcMain.handle('get-tiling-layouts', () => {
   catch { return { monitors: {} } }
 })
 
+// Augment a monitorData with screen-physical bounds for Python's Win32
+// SetWindowPos. Electron saves work areas in DIPs, but in a per-monitor
+// DPI-aware Windows process the desktop coordinate space is in physical
+// pixels — for example DELL at 125% spans 0..2560 physically (0..2048
+// in DIPs), so a portrait monitor that Electron reports starting at DIP
+// x=2048 actually starts at physical x=2560. `dipToScreenRect` does the
+// conversion accounting for every preceding monitor's scale.
+function augmentWithPhysBounds(monitorData, displayId) {
+  try {
+    const d = screen.getAllDisplays().find(x => String(x.id) === String(displayId))
+    if (!d) return monitorData
+    const dipRect  = { x: d.workArea.x, y: d.workArea.y, width: d.workArea.width, height: d.workArea.height }
+    const physRect = screen.dipToScreenRect(null, dipRect)
+    monitorData.physX      = physRect.x
+    monitorData.physY      = physRect.y
+    monitorData.physWidth  = physRect.width
+    monitorData.physHeight = physRect.height
+  } catch {}
+  return monitorData
+}
+
 ipcMain.handle('set-tiling-layout', (_, { monitorId, monitorData }) => {
+  augmentWithPhysBounds(monitorData, monitorId)
   let layouts = { monitors: {} }
   try { layouts = JSON.parse(fs.readFileSync(TILING_FILE, 'utf8')) } catch {}
   if (!layouts.monitors) layouts.monitors = {}
@@ -286,6 +350,156 @@ ipcMain.on('close-voice-settings', () => {
   if (voiceSettingsWin && !voiceSettingsWin.isDestroyed()) voiceSettingsWin.close()
 })
 
+// ── Command Editor (replaces tkinter editor.py) ──────────────────────────────
+
+// Keep this in sync with BUILTIN_MAP in core/dispatcher.py
+const BUILTIN_REFERENCE = [
+  { key: 'get_time',         label: 'Tell me the time' },
+  { key: 'get_date',         label: 'Tell me the date' },
+  { key: 'volume_up',        label: 'Volume up' },
+  { key: 'volume_down',      label: 'Volume down' },
+  { key: 'toggle_mute',      label: 'Mute / unmute' },
+  { key: 'play_pause',       label: 'Play / pause media' },
+  { key: 'next_track',       label: 'Next track' },
+  { key: 'prev_track',       label: 'Previous track' },
+  { key: 'screenshot',       label: 'Take a screenshot' },
+  { key: 'list_reminders',   label: 'List my reminders' },
+  { key: 'cancel_reminders', label: 'Cancel all reminders' },
+  { key: 'open_editor',      label: 'Open command editor' },
+  { key: 'sleep',            label: 'Put PC to sleep' },
+  { key: 'shutdown',         label: 'Shut down PC' },
+  { key: 'cancel_shutdown',  label: 'Cancel shutdown' },
+]
+
+function openCommandEditor() {
+  if (commandEditorWin && !commandEditorWin.isDestroyed()) {
+    commandEditorWin.focus(); return
+  }
+  commandEditorWin = new BrowserWindow({
+    width: 920, height: 680, minWidth: 720, minHeight: 520,
+    title: 'Eve — Command Editor',
+    backgroundColor: '#080e18',
+    frame: true, resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+    },
+  })
+  commandEditorWin.setMenuBarVisibility(false)
+  commandEditorWin.loadFile(path.join(__dirname, 'src', 'command-editor', 'index.html'))
+  commandEditorWin.on('closed', () => { commandEditorWin = null })
+}
+
+ipcMain.on('open-command-editor',  openCommandEditor)
+ipcMain.on('close-command-editor', () => {
+  if (commandEditorWin && !commandEditorWin.isDestroyed()) commandEditorWin.close()
+})
+
+// ── Running Programs panel ───────────────────────────────────────────────────
+
+function openPrograms() {
+  if (programsWin && !programsWin.isDestroyed()) { programsWin.focus(); return }
+  programsWin = new BrowserWindow({
+    width: 640, height: 600, minWidth: 480, minHeight: 380,
+    title: 'Eve — Running Programs',
+    backgroundColor: '#080e18',
+    frame: true, resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+    },
+  })
+  programsWin.setMenuBarVisibility(false)
+  programsWin.loadFile(path.join(__dirname, 'src', 'programs', 'index.html'))
+  programsWin.on('closed', () => { programsWin = null })
+}
+
+ipcMain.on('open-programs',  openPrograms)
+ipcMain.on('close-programs', () => {
+  if (programsWin && !programsWin.isDestroyed()) programsWin.close()
+})
+
+// ── Memory panel ─────────────────────────────────────────────────────────────
+
+function openMemory() {
+  if (memoryWin && !memoryWin.isDestroyed()) { memoryWin.focus(); return }
+  memoryWin = new BrowserWindow({
+    width: 560, height: 520, minWidth: 460, minHeight: 360,
+    title: 'Eve — Memory',
+    backgroundColor: '#080e18',
+    frame: true, resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+    },
+  })
+  memoryWin.setMenuBarVisibility(false)
+  memoryWin.loadFile(path.join(__dirname, 'src', 'memory', 'index.html'))
+  memoryWin.on('closed', () => { memoryWin = null })
+}
+
+ipcMain.on('open-memory',  openMemory)
+ipcMain.on('close-memory', () => {
+  if (memoryWin && !memoryWin.isDestroyed()) memoryWin.close()
+})
+
+// Read/write helpers for the three editor files
+const _readJsonList = (p) => {
+  try {
+    const v = JSON.parse(fs.readFileSync(p, 'utf8'))
+    return Array.isArray(v) ? v : []
+  } catch { return [] }
+}
+const _writeJsonList = (p, data) => {
+  if (!Array.isArray(data)) return { ok: false, error: 'not an array' }
+  try {
+    fs.writeFileSync(p, JSON.stringify(data, null, 2))
+    // Notify any open window so it can refresh
+    BrowserWindow.getAllWindows().forEach(w => {
+      if (!w.isDestroyed()) w.webContents.send('commands-changed', { file: path.basename(p) })
+    })
+    return { ok: true }
+  } catch (e) { return { ok: false, error: e.message } }
+}
+
+ipcMain.handle('command-editor:get-commands', () => _readJsonList(COMMANDS_FILE))
+ipcMain.handle('command-editor:set-commands', (_, data) => _writeJsonList(COMMANDS_FILE, data))
+ipcMain.handle('command-editor:get-apps',     () => _readJsonList(APPS_FILE))
+ipcMain.handle('command-editor:set-apps',     (_, data) => _writeJsonList(APPS_FILE, data))
+ipcMain.handle('command-editor:get-aliases',  () => _readJsonList(ALIASES_FILE))
+ipcMain.handle('command-editor:set-aliases',  (_, data) => _writeJsonList(ALIASES_FILE, data))
+ipcMain.handle('command-editor:get-builtins', () => BUILTIN_REFERENCE)
+
+ipcMain.handle('command-editor:browse-exe', async () => {
+  const win = commandEditorWin && !commandEditorWin.isDestroyed() ? commandEditorWin : null
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Pick executable',
+    filters: [
+      { name: 'Executables', extensions: ['exe', 'lnk', 'bat', 'cmd'] },
+      { name: 'All files',   extensions: ['*'] },
+    ],
+    properties: ['openFile'],
+  })
+  return r.canceled ? null : r.filePaths[0]
+})
+
+// Raw JSON: get a file by short name
+ipcMain.handle('command-editor:get-raw', (_, fileKey) => {
+  const map = { commands: COMMANDS_FILE, apps: APPS_FILE, aliases: ALIASES_FILE }
+  const p = map[fileKey]; if (!p) return ''
+  try { return fs.readFileSync(p, 'utf8') } catch { return '[]' }
+})
+ipcMain.handle('command-editor:set-raw', (_, { fileKey, text }) => {
+  const map = { commands: COMMANDS_FILE, apps: APPS_FILE, aliases: ALIASES_FILE }
+  const p = map[fileKey]; if (!p) return { ok: false, error: 'unknown file' }
+  // Validate JSON before writing
+  let parsed
+  try { parsed = JSON.parse(text) }
+  catch (e) { return { ok: false, error: 'Invalid JSON: ' + e.message } }
+  if (!Array.isArray(parsed)) return { ok: false, error: 'Top level must be an array' }
+  return _writeJsonList(p, parsed)
+})
+
 // ── Identify Monitors (voice: "identify monitors") ───────────────────────────
 
 let _monitorIdWins = []
@@ -300,14 +514,16 @@ function identifyMonitors(durationMs = 3500) {
   const primary  = screen.getPrimaryDisplay()
   const displays = screen.getAllDisplays()
   const CARD     = 340
+  const MARGIN   = 20
   const HTML     = path.join(__dirname, 'src', 'monitor-id', 'index.html')
 
   displays.forEach((d, i) => {
-    const { x, y, width, height } = d.bounds
+    // Bottom-left of workArea (excludes taskbar)
+    const wa = d.workArea
     const win = new BrowserWindow({
       width: CARD, height: CARD,
-      x: Math.round(x + (width  - CARD) / 2),
-      y: Math.round(y + (height - CARD) / 2),
+      x: Math.round(wa.x + MARGIN),
+      y: Math.round(wa.y + wa.height - CARD - MARGIN),
       frame: false, transparent: true,
       alwaysOnTop: true, skipTaskbar: true, resizable: false,
       focusable: false, hasShadow: false,
@@ -339,6 +555,235 @@ function identifyMonitors(durationMs = 3500) {
 }
 
 ipcMain.on('identify-monitors', () => identifyMonitors())
+
+// ── Window-Manager voice control ─────────────────────────────────────────────
+
+// Mirror of the renderer's PRESETS so voice changes can be applied without
+// the WM panel being open. Keep in sync with ui/src/window-manager/app.js
+// (or factor out into a shared file later).
+const WM_PRESETS = {
+  'full': {
+    label: 'Full',
+    zones: [{ name: 'full', x_pct: 0, y_pct: 0, w_pct: 1, h_pct: 1 }],
+  },
+  'top-bottom': {
+    label: 'Top / Bot',
+    zones: [
+      { name: 'top',    x_pct: 0, y_pct: 0,   w_pct: 1, h_pct: 0.5 },
+      { name: 'bottom', x_pct: 0, y_pct: 0.5, w_pct: 1, h_pct: 0.5 },
+    ],
+  },
+  'left-right': {
+    label: 'Left / Right',
+    zones: [
+      { name: 'left',  x_pct: 0,   y_pct: 0, w_pct: 0.5, h_pct: 1 },
+      { name: 'right', x_pct: 0.5, y_pct: 0, w_pct: 0.5, h_pct: 1 },
+    ],
+  },
+  'main-right': {
+    label: 'Main + Right',
+    zones: [
+      { name: 'main',  x_pct: 0,    y_pct: 0, w_pct: 0.67, h_pct: 1 },
+      { name: 'right', x_pct: 0.67, y_pct: 0, w_pct: 0.33, h_pct: 1 },
+    ],
+  },
+  'main-stack': {
+    label: '1 + 2 Stack',
+    zones: [
+      { name: 'main',         x_pct: 0,   y_pct: 0,   w_pct: 0.5, h_pct: 1   },
+      { name: 'top-right',    x_pct: 0.5, y_pct: 0,   w_pct: 0.5, h_pct: 0.5 },
+      { name: 'bottom-right', x_pct: 0.5, y_pct: 0.5, w_pct: 0.5, h_pct: 0.5 },
+    ],
+  },
+  'grid-4': {
+    label: 'Grid 2x2',
+    zones: [
+      { name: 'top-left',     x_pct: 0,   y_pct: 0,   w_pct: 0.5, h_pct: 0.5 },
+      { name: 'top-right',    x_pct: 0.5, y_pct: 0,   w_pct: 0.5, h_pct: 0.5 },
+      { name: 'bottom-left',  x_pct: 0,   y_pct: 0.5, w_pct: 0.5, h_pct: 0.5 },
+      { name: 'bottom-right', x_pct: 0.5, y_pct: 0.5, w_pct: 0.5, h_pct: 0.5 },
+    ],
+  },
+}
+
+function resolveDisplay(ref) {
+  // ref can be: 'primary', a 1-based index string ('1'), or 'hud'.
+  const all = screen.getAllDisplays()
+  const r   = String(ref || '').toLowerCase().trim()
+  if (r === 'primary')  return screen.getPrimaryDisplay()
+  if (r === 'hud') {
+    const { overlayDisplayId } = loadSettings()
+    if (overlayDisplayId) {
+      const f = all.find(d => d.id === overlayDisplayId)
+      if (f) return f
+    }
+    return screen.getPrimaryDisplay()
+  }
+  const n = parseInt(r, 10)
+  if (!isNaN(n) && n >= 1 && n <= all.length) return all[n - 1]
+  return null
+}
+
+// ── Identify Zones — overlay saved tiling layouts on each monitor ────────────
+
+let _zoneIdWins = []
+
+function identifyZones(durationMs = 6000) {
+  // Close any prior session immediately
+  for (const w of _zoneIdWins) if (w && !w.isDestroyed()) w.close()
+  _zoneIdWins = []
+
+  let layouts = {}
+  try { layouts = JSON.parse(fs.readFileSync(TILING_FILE, 'utf8')) } catch {}
+  const monitors = (layouts && layouts.monitors) || {}
+
+  const displays = screen.getAllDisplays()
+  const HTML     = path.join(__dirname, 'src', 'zone-id', 'index.html')
+
+  displays.forEach((d, i) => {
+    const saved = monitors[String(d.id)]
+    if (!saved || !saved.zones || !saved.zones.length) return
+    const wa = d.workArea
+    const win = new BrowserWindow({
+      width: wa.width, height: wa.height, x: wa.x, y: wa.y,
+      frame: false, transparent: true,
+      alwaysOnTop: true, skipTaskbar: true, resizable: false,
+      // focusable: true so click events route through to the renderer
+      focusable: true, hasShadow: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+    })
+    win.setAlwaysOnTop(true, 'screen-saver', 1)
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+
+    const hash = new URLSearchParams({
+      zones:        JSON.stringify(saved.zones),
+      layout:       saved.layout || '',
+      monitorIndex: String(i + 1),
+      monitorLabel: d.label || `Display ${i + 1}`,
+    }).toString()
+    win.loadURL(`file://${HTML.replace(/\\/g, '/')}#${hash}`)
+
+    win.on('closed', () => { _zoneIdWins = _zoneIdWins.filter(w => w !== win) })
+    _zoneIdWins.push(win)
+  })
+
+  setTimeout(() => {
+    for (const w of _zoneIdWins) if (w && !w.isDestroyed()) w.close()
+    _zoneIdWins = []
+  }, durationMs)
+}
+
+ipcMain.on('identify-zones',       () => identifyZones())
+ipcMain.on('dismiss-zone-overlay', (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  if (win && !win.isDestroyed()) win.close()
+})
+
+// ── Identify Windows — numbered label tags on each open window ───────────────
+
+let _windowIdWins = []
+
+function identifyWindows(payload, durationMs = 6000) {
+  for (const w of _windowIdWins) if (w && !w.isDestroyed()) w.close()
+  _windowIdWins = []
+
+  const list = (payload && payload.windows) || []
+  if (!list.length) return
+  const HTML = path.join(__dirname, 'src', 'window-id', 'index.html')
+
+  for (const item of list) {
+    const TAG_W = 180
+    const TAG_H = 36
+    // Anchor at the window's top-left, but keep it clamped on-screen.
+    const x = Math.round(item.x + 6)
+    const y = Math.round(item.y + 6)
+    const win = new BrowserWindow({
+      width: TAG_W, height: TAG_H, x, y,
+      frame: false, transparent: true,
+      alwaysOnTop: true, skipTaskbar: true, resizable: false,
+      focusable: true, hasShadow: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
+    })
+    win.setAlwaysOnTop(true, 'screen-saver', 1)
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+    const hash = new URLSearchParams({
+      index: String(item.index),
+      label: String(item.label || ''),
+    }).toString()
+    win.loadURL(`file://${HTML.replace(/\\/g, '/')}#${hash}`)
+    win.on('closed', () => { _windowIdWins = _windowIdWins.filter(w => w !== win) })
+    _windowIdWins.push(win)
+  }
+
+  setTimeout(() => {
+    for (const w of _windowIdWins) if (w && !w.isDestroyed()) w.close()
+    _windowIdWins = []
+  }, durationMs)
+}
+
+ipcMain.on('identify-windows',        (_, payload) => identifyWindows(payload))
+ipcMain.on('dismiss-window-overlay',  (e) => {
+  const win = BrowserWindow.fromWebContents(e.sender)
+  if (win && !win.isDestroyed()) win.close()
+})
+
+// ── Voice WM mutation: apply preset + move HUD ───────────────────────────────
+
+function notifyLayoutsChanged() {
+  if (windowManagerWin && !windowManagerWin.isDestroyed()) {
+    windowManagerWin.webContents.send('layouts-changed')
+  }
+}
+
+ipcMain.on('wm-apply-preset', (_, { monitorRef, presetKey }) => {
+  const d      = resolveDisplay(monitorRef)
+  const preset = WM_PRESETS[presetKey]
+  if (!d || !preset) return
+
+  const monitorData = {
+    label:       d.label || `Display ${d.id}`,
+    workX:       d.workArea.x,
+    workY:       d.workArea.y,
+    workWidth:   d.workArea.width,
+    workHeight:  d.workArea.height,
+    scaleFactor: d.scaleFactor || 1.0,
+    layout:      presetKey,
+    zones:       preset.zones,
+  }
+  augmentWithPhysBounds(monitorData, d.id)
+
+  let layouts = { monitors: {} }
+  try { layouts = JSON.parse(fs.readFileSync(TILING_FILE, 'utf8')) } catch {}
+  if (!layouts.monitors) layouts.monitors = {}
+  layouts.monitors[String(d.id)] = monitorData
+
+  try {
+    fs.writeFileSync(TILING_FILE, JSON.stringify(layouts, null, 2))
+    notifyLayoutsChanged()
+  } catch (e) {
+    console.error('wm-apply-preset write failed:', e)
+  }
+})
+
+ipcMain.on('wm-move-hud', (_, { monitorRef }) => {
+  const d = resolveDisplay(monitorRef)
+  if (!d) return
+  saveSettings({ overlayDisplayId: d.id })
+  positionOrb()
+  if (dirWin && !dirWin.isDestroyed() && dirWin.isVisible()) positionDirectory()
+  // If WM is open, refresh so the HUD pin badge updates
+  if (windowManagerWin && !windowManagerWin.isDestroyed()) {
+    windowManagerWin.webContents.send('displays-changed')
+  }
+})
+
+ipcMain.on('wm-set-orb-corner', (_, { corner }) => {
+  const valid = ['top-right', 'top-left', 'bottom-right', 'bottom-left']
+  if (!valid.includes(corner)) return
+  saveSettings({ overlayCorner: corner })
+  positionOrb()
+  if (dirWin && !dirWin.isDestroyed() && dirWin.isVisible()) positionDirectory()
+})
 
 // ── Snap panel (voice: "snap window manager to top-left") ────────────────────
 

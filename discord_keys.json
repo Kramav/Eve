@@ -1,0 +1,15 @@
+{
+  "_comment": "Edit global_keybinds to mirror what you set in Discord Settings -> Keybinds. The in_app_shortcuts are Discord's built-in defaults; only change them if you remapped them.",
+  "global_keybinds": {
+    "mute":       "ctrl+shift+alt+m",
+    "deafen":     "ctrl+shift+alt+d",
+    "disconnect": "ctrl+shift+alt+h"
+  },
+  "in_app_shortcuts": {
+    "next_channel":  "alt+down",
+    "prev_channel":  "alt+up",
+    "next_server":   "ctrl+alt+down",
+    "prev_server":   "ctrl+alt+up",
+    "quick_switch":  "ctrl+k"
+  }
+}

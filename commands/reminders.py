@@ -26,6 +26,14 @@ def set_reminder(minutes: str, message: str) -> str:
     data = _load()
     data.append({"message": message.strip(), "trigger": trigger, "fired": False})
     _save(data)
+    # Register for "cancel it" follow-up — cancels ALL pending reminders, which
+    # matches existing `cancel_all` semantics. A future enhancement could capture
+    # just this trigger and remove only it.
+    from core import session as _sess_mod
+    _sess_mod.set_last_action(_sess_mod.LastAction(
+        description=f"reminder in {minutes} minutes",
+        cancelable=cancel_all,
+    ))
     return f"Reminder set for {minutes} minutes: {message}"
 
 

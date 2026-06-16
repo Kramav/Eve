@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+  <title>Eve — Command Editor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="titlebar">
+    <span class="titlebar-title">COMMAND EDITOR</span>
+    <span class="titlebar-sub">Custom voice commands, apps, and aliases</span>
+  </div>
+
+  <nav class="tabnav">
+    <button class="tab active" data-tab="commands">Commands</button>
+    <button class="tab"        data-tab="apps">Apps</button>
+    <button class="tab"        data-tab="aliases">Aliases</button>
+    <button class="tab"        data-tab="raw">Raw JSON</button>
+  </nav>
+
+  <main class="content">
+
+    <!-- ── Commands tab ────────────────────────────────────────────────── -->
+    <section class="tab-pane active" id="tab-commands" data-tab="commands">
+      <div class="tab-hint">Match-any phrase. Eve runs the shell command when you say it.</div>
+      <div class="rows" id="rows-commands"></div>
+      <button class="add-btn" data-add="commands">+ Add command</button>
+
+      <div class="reference">
+        <button class="reference-toggle" id="ref-toggle" type="button" aria-expanded="false">
+          <span class="ref-caret">▶</span>
+          BUILT-IN COMMANDS — always available
+        </button>
+        <div class="reference-body" id="ref-body">
+          <div class="ref-row"><span class="ref-phrase">open / launch / start [app]</span><span class="ref-desc">Launch any app in your Apps list</span></div>
+          <div class="ref-row"><span class="ref-phrase">close / quit [app]</span><span class="ref-desc">Close a running app</span></div>
+          <div class="ref-row"><span class="ref-phrase">search for [query]</span><span class="ref-desc">DuckDuckGo web search</span></div>
+          <div class="ref-row"><span class="ref-phrase">what time is it</span><span class="ref-desc">Speak the current time</span></div>
+          <div class="ref-row"><span class="ref-phrase">what's the date</span><span class="ref-desc">Speak today's date</span></div>
+          <div class="ref-row"><span class="ref-phrase">remind me in [N] minutes to [task]</span><span class="ref-desc">Set a timed reminder</span></div>
+          <div class="ref-row"><span class="ref-phrase">set timer for [N] minutes</span><span class="ref-desc">Set a countdown timer</span></div>
+          <div class="ref-row"><span class="ref-phrase">volume up / down</span><span class="ref-desc">Adjust system volume</span></div>
+          <div class="ref-row"><span class="ref-phrase">mute / unmute</span><span class="ref-desc">Toggle mute</span></div>
+          <div class="ref-row"><span class="ref-phrase">pause / play / resume</span><span class="ref-desc">Media play/pause</span></div>
+          <div class="ref-row"><span class="ref-phrase">next / previous track</span><span class="ref-desc">Skip tracks</span></div>
+          <div class="ref-row"><span class="ref-phrase">take a screenshot</span><span class="ref-desc">Save PNG to Desktop</span></div>
+          <div class="ref-row"><span class="ref-phrase">snap [app] to [zone]</span><span class="ref-desc">Tile a window to a saved zone</span></div>
+          <div class="ref-row"><span class="ref-phrase">identify monitors / zones / windows</span><span class="ref-desc">Briefly overlay labels</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Apps tab ────────────────────────────────────────────────────── -->
+    <section class="tab-pane" id="tab-apps" data-tab="apps">
+      <div class="tab-hint">Say <code>open [name]</code> to launch any app in this list.</div>
+      <div class="rows" id="rows-apps"></div>
+      <button class="add-btn" data-add="apps">+ Add app</button>
+    </section>
+
+    <!-- ── Aliases tab ─────────────────────────────────────────────────── -->
+    <section class="tab-pane" id="tab-aliases" data-tab="aliases">
+      <div class="tab-hint">Add your own phrase for any built-in command.</div>
+      <div class="rows" id="rows-aliases"></div>
+      <button class="add-btn" data-add="aliases">+ Add alias</button>
+    </section>
+
+    <!-- ── Raw JSON tab ────────────────────────────────────────────────── -->
+    <section class="tab-pane" id="tab-raw" data-tab="raw">
+      <div class="raw-bar">
+        <label class="raw-label">FILE</label>
+        <select id="raw-file">
+          <option value="commands">custom_commands.json</option>
+          <option value="apps">apps.json</option>
+          <option value="aliases">aliases.json</option>
+        </select>
+        <span class="raw-status" id="raw-status">Loading…</span>
+        <button class="raw-save" id="raw-save">Save</button>
+      </div>
+      <div class="raw-editor">
+        <pre class="raw-highlight" id="raw-highlight"></pre>
+        <textarea class="raw-text" id="raw-text" spellcheck="false"></textarea>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <span class="status-msg" id="status-msg">Loaded</span>
+    <button class="reload-btn" id="reload-btn">Reload</button>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

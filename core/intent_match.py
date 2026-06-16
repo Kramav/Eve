@@ -41,7 +41,8 @@ _SCORER = _ws(fuzz.token_set_ratio)
 def build_catalog() -> list[tuple[str, Callable, tuple]]:
     """Assemble the catalog. Called fresh each dispatch — apps/aliases live in
     files that the user can edit, so we want to pick up changes immediately."""
-    from commands import apps, system, reminders, youtube, tiling, search
+    from commands import apps, system, reminders, youtube, tiling, search, window_manager as wm
+    from commands import windows as windows_cmd
     import json
     from pathlib import Path
 
@@ -84,6 +85,23 @@ def build_catalog() -> list[tuple[str, Callable, tuple]]:
         ('show monitor numbers',    system.identify_monitors, ()),
         ('which monitor is which',  system.identify_monitors, ()),
         ('label displays',          system.identify_monitors, ()),
+        ('identify windows',        windows_cmd.identify_windows, ()),
+        ('show open windows',       windows_cmd.identify_windows, ()),
+        ('list open windows',       windows_cmd.identify_windows, ()),
+        ('list windows',            windows_cmd.identify_windows, ()),
+        ('what is open',            windows_cmd.identify_windows, ()),
+        ('what windows are open',   windows_cmd.identify_windows, ()),
+        ('whats open',              windows_cmd.identify_windows, ()),
+        ('show me open windows',    windows_cmd.identify_windows, ()),
+        ('identify zones',          system.identify_zones,    ()),
+        ('show zones',              system.identify_zones,    ()),
+        ('show tiling layouts',     system.identify_zones,    ()),
+        ('show tiles',              system.identify_zones,    ()),
+        ('show segments',           system.identify_zones,    ()),
+        ('show the layouts',        system.identify_zones,    ()),
+        ('move hud to primary',     wm.move_hud,              ('primary',)),
+        ('set hud to primary',      wm.move_hud,              ('primary',)),
+        ('pin hud to primary',      wm.move_hud,              ('primary',)),
         ('volume up',               system.volume_up,         ()),
         ('volume down',             system.volume_down,       ()),
         ('mute',                    system.toggle_mute,       ()),

@@ -1,9 +1,11 @@
 // ── Module registry — add entries here to register new modules ───────────────
 const MODULES = [
-  { id: 'app-manager',    label: 'App Manager',    icon: '⬡', action: () => window.eve.openAppManager()    },
-  { id: 'window-manager', label: 'Window Manager', icon: '⬢', action: () => window.eve.openWindowManager() },
-  { id: 'commands',       label: 'Command Editor',       icon: '⌨', action: () => send('open_command_editor')    },
-  { id: 'voice-settings', label: 'Voice Settings',          icon: '◈', action: () => window.eve.openVoiceSettings() },
+  { id: 'app-manager',    label: 'App Manager',       icon: '⬡', action: () => window.eve.openAppManager()    },
+  { id: 'window-manager', label: 'Window Manager',    icon: '⬢', action: () => window.eve.openWindowManager() },
+  { id: 'programs',       label: 'Running Programs',  icon: '◉', action: () => window.eve.openPrograms()       },
+  { id: 'memory',         label: 'Memory',            icon: '✦', action: () => window.eve.openMemory()         },
+  { id: 'commands',       label: 'Command Editor',    icon: '⌨', action: () => send('open_command_editor')    },
+  { id: 'voice-settings', label: 'Voice Settings',    icon: '◈', action: () => window.eve.openVoiceSettings() },
 ]
 
 function renderModules() {

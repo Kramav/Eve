@@ -2,7 +2,16 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from commands import apps, system, search, reminders, youtube, tiling
+from commands import apps, system, search, reminders, youtube, tiling, window_manager as wm
+from commands import windows as windows_cmd
+from commands import programs as programs_cmd
+from commands import discord as discord_cmd
+from commands import context as ctx_cmd
+
+
+def _send_to_discord(text, recipient):
+    """Argument flip for the 'send X to Y on discord' pattern."""
+    return discord_cmd.send_message(recipient, text)
 import core.session as _sess_mod
 from core.session import Mode
 
@@ -59,6 +68,15 @@ def _help() -> str:
     return _HELP_TEXT
 
 
+# Snap shims — let the dispatcher pass regex groups positionally regardless of
+# whether the monitor qualifier was captured before or after the zone.
+def _snap_zone_monitor(app, zone, monitor): return tiling.snap_app(app, zone, monitor)
+def _snap_monitor_zone(app, monitor, zone): return tiling.snap_app(app, zone, monitor)
+# "snap firefox to monitor 2" with no zone implies the implicit full zone —
+# every saved monitor exposes 'full' even when its preset is e.g. top-bottom.
+def _snap_monitor_only(app, monitor):       return tiling.snap_app(app, 'full', monitor)
+
+
 # (regex pattern, handler) — first match wins, captured groups passed as args
 INTENTS = [
     # Command editor
@@ -71,10 +89,69 @@ INTENTS = [
     (r"(?:close|quit|exit|dismiss) (?:the )?window manager",   system.close_window_manager),
     (r"kill (?:the )?window manager",                           system.close_window_manager),
 
+    # ── Non-specific follow-ups (must come before snap / open_app) ────────
+    (r"\b(?:go\s+back|undo(?:\s+that)?|revert(?:\s+that)?)\b",                             ctx_cmd.undo),
+    (r"\bclose\s+(?:that(?:\s+window)?|it|the\s+(?:last\s+)?window)\b",                    ctx_cmd.close_last),
+    (r"\bcancel\s+(?:that|it|the\s+last\s+(?:one|thing))\b",                               ctx_cmd.cancel_last),
+
+    # Memory panel + memory writes — high priority to beat snap/open_app
+    (r"(?:open|show)\s+(?:the\s+)?(?:memory|memories|brain)",                              ctx_cmd.open_memory_panel),
+    (r"\bremember(?:\s+that)?\s+(?:my\s+)?(.+?)\s+(?:is|equals)\s+(.+)$",                  ctx_cmd.remember_voice),
+    (r"\bforget\s+(?:my\s+)?(?:about\s+)?(.+)$",                                           ctx_cmd.forget_voice),
+
+    # ── Discord navigation + messaging ────────────────────────────────────
+    # Must come BEFORE snap and apps.open_app so:
+    #   - "open discord search" routes to quick_switcher, not open_app
+    #   - "send hello to alice on discord" routes to send_message, not snap
+    (r"\bnext\s+(?:discord\s+)?channel\b",                                                    discord_cmd.next_channel),
+    (r"\b(?:previous|prev|last|back)\s+(?:discord\s+)?channel\b",                             discord_cmd.prev_channel),
+    (r"\bnext\s+(?:discord\s+)?server\b",                                                     discord_cmd.next_server),
+    (r"\b(?:previous|prev|last)\s+(?:discord\s+)?server\b",                                   discord_cmd.prev_server),
+    (r"\b(?:open|show)\s+(?:the\s+)?(?:discord\s+)?(?:quick\s+)?(?:switcher|search)\b",       discord_cmd.quick_switcher),
+    (r"\b(?:tell|dm|message)\s+(\S+)\s+(.+)$",                                                discord_cmd.send_message),
+    (r"\bsend\s+(.+?)\s+to\s+(\S+)\s+on\s+discord\b",                                         _send_to_discord),
+
+    # Running Programs panel — open the live program-detector panel.
+    # MUST come before "identify windows" so "running programs" / "what programs"
+    # routes here, not to the visual identifier.
+    (r"\b(?:open|show|launch)\s+(?:the\s+)?running\s+programs?(?:\s+panel)?\b",                                 programs_cmd.open_panel),
+    (r"\b(?:open|show|launch)\s+(?:the\s+)?programs?\s+(?:panel|detector|list)\b",                              programs_cmd.open_panel),
+
+    # Speak-list — "what's running" / "what programs are running" / "list programs"
+    (r"\bwhat(?:'?s)?\s+(?:\w+\s+){0,2}?programs?\s+(?:are\s+(?:running|open)|do\s+i\s+have)\b",                programs_cmd.list_running_aloud),
+    (r"\blist\s+(?:the\s+)?(?:running\s+)?programs?\b",                                                          programs_cmd.list_running_aloud),
+
+    # Identify Windows — overlay a numbered tag on each open top-level window.
+    # MUST come before Identify Monitors / Zones so "identify windows" /
+    # "what's open" doesn't get swallowed by them.
+    (r"\b(?:identify|show|list|reveal)\s+(?:\w+\s+){0,2}?(?:open\s+)?(?:windows?|apps?\s+(?:open|running))\b",  windows_cmd.identify_windows),
+    (r"\bwhat(?:'?s)?\s+(?:\w+\s+){0,3}?(?:open|running)\b",                                                     windows_cmd.identify_windows),
+
+    # Identify Zones — overlay saved tiling layouts on each monitor.
+    # MUST come before Identify Monitors so "identify segments"/"identify tiles"/
+    # "show zones" don't get swallowed by the monitors regex below.
+    (r"\b(?:identify|show|reveal|display)\s+(?:\w+\s+){0,2}?(?:zones?|segments?|tiles?|tiling(?:\s+layouts?)?|layouts?)\b",  system.identify_zones),
+
     # Identify Monitors — flash a numbered card on each monitor.
     # (?:\w+\s+){0,2}? tolerates filler like "show me monitor numbers" / "label all displays"
     (r"\b(?:identify|show|label|number)\s+(?:\w+\s+){0,2}?(?:monitors?|displays?|screens?)\b",  system.identify_monitors),
     (r"which\s+monitor\s+is\s+which",                                                            system.identify_monitors),
+
+    # ── Voice WM mutation ─────────────────────────────────────────────────
+    # "set monitor 1 to 2x2 grid", "make monitor two top and bottom",
+    # "change display three to full screen" — connector to/into/as is optional
+    (r"(?:set|make|change|configure)\s+(?:the\s+)?(?:monitor|display|screen)\s+(\S+)\s+(?:(?:to|into|as)\s+)?(.+)",  wm.set_monitor_layout),
+    # "monitor 2 grid" / "display three full" (no verb form)
+    (r"^(?:monitor|display|screen)\s+(\S+)\s+(.+)$",                                                                 wm.set_monitor_layout),
+
+    # "move hud to monitor 2", "set hud to primary", "pin hud to display 1"
+    # Move orb to a screen corner — MUST come before the bare move_hud pattern
+    # below, otherwise (.+) eats the whole "top-left" / "bottom right corner" tail.
+    (r"(?:move|set|pin|put|place|send)\s+(?:the\s+)?(?:hud|orb|overlay)\s+"
+     r"(?:to|in|on|at|onto|into)\s+(?:the\s+)?"
+     r"(top|upper|bottom|lower)[-\s]+(left|right)(?:\s+corner)?$",                                              wm.move_orb_corner),
+
+    (r"(?:move|set|pin|put|send)\s+(?:the\s+)?(?:hud|orb|overlay)\s+(?:to|on|onto)\s+(.+)",                     wm.move_hud),
 
     # App Manager
     (r"(?:open|show|launch) (?:the )?app manager",             system.open_app_manager),
@@ -89,10 +166,71 @@ INTENTS = [
     # "search youtube" must not fall through to web_search
     (r"(?:open|launch|browse|show(?: me)?) (?:youtube|yt)(?:\s+home(?:page)?)?|^youtube$", youtube.browse_home_intent),
     (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",             youtube.play_query_intent),
-    (r"(?:play|watch)\s+(.+)",                                    youtube.play_query_intent),
+    # \b prevents matching "play" inside "display", "watch" inside "watchful", etc.
+    (r"\b(?:play|watch)\s+(.+)",                                  youtube.play_query_intent),
 
-    # Tiling — before generic apps patterns so "snap/move X to Y" doesn't route to open_app
+    # Tiling — before generic apps patterns so "snap/move X to Y" doesn't route to open_app.
+    # Explicit-monitor variants come FIRST so the monitor qualifier isn't swallowed by the
+    # bare-zone pattern's [\w-]+ zone capture.
+    #
+    # Positional aliases recognized: primary | left/leftmost | middle/center | right/rightmost.
+    # Optional trailing "monitor"/"display"/"screen" word is fine after positionals.
+
+    # "snap X to top of monitor 2" / "snap X to top of left monitor" /
+    # "snap X to top on primary" / "snap X to top of middle"
+    (r"(?:snap|move|send|bring|put)\s+(.+?)\s+to\s+(?:the\s+)?"
+     r"([\w-]+)(?:\s+(?:zone|half|section))?\s+(?:on|of)\s+(?:the\s+)?"
+     r"(primary|leftmost|rightmost|left|middle|center|right"
+       r"|(?:left|right|leftmost|rightmost|middle|center)\s+(?:monitor|display|screen)"
+       r"|(?:monitor|display|screen)\s+\S+(?:\s+\S+)?)$",                             _snap_zone_monitor),
+
+    # "snap X to monitor 2 top" / "snap X to display two bottom"
+    (r"(?:snap|move|send|bring|put)\s+(.+?)\s+to\s+(?:the\s+)?"
+     r"(?:monitor|display|screen)\s+(\S+(?:\s+\S+)?)\s+([\w-]+)$",                    _snap_monitor_zone),
+
+    # Positional + REQUIRED "monitor" + zone:  "snap X to left monitor top"
+    (r"(?:snap|move|send|bring|put)\s+(.+?)\s+to\s+(?:the\s+)?"
+     r"(primary|leftmost|rightmost|left|middle|center|right)"
+     r"\s+(?:monitor|display|screen)\s+([\w-]+)$",                                    _snap_monitor_zone),
+
+    # Positional + zone (no "monitor" word):  "snap X to left top" / "primary full".
+    # Negative lookahead prevents matching "to left monitor" with zone="monitor" —
+    # those fall through to the monitor-only patterns below.
+    (r"(?:snap|move|send|bring|put)\s+(.+?)\s+to\s+(?:the\s+)?"
+     r"(primary|leftmost|rightmost|left|middle|center|right)"
+     r"(?!\s+(?:monitor|display|screen))\s+([\w-]+)$",                                _snap_monitor_zone),
+
+    # Monitor only — no zone, implies the implicit 'full' zone.
+    # "snap X to monitor 2" / "bring X to display one"
+    (r"(?:snap|move|send|bring|put)\s+(.+?)\s+to\s+(?:the\s+)?"
+     r"(?:monitor|display|screen)\s+(\S+(?:\s+\S+)?)$",                _snap_monitor_only),
+    # Positional + optional "monitor":  "snap X to left" / "snap X to right monitor"
+    (r"(?:snap|move|send|bring|put)\s+(.+?)\s+to\s+(?:the\s+)?"
+     r"(primary|leftmost|rightmost|left|middle|center|right)"
+     r"(?:\s+(?:monitor|display|screen))?$",                           _snap_monitor_only),
+
+    # Z-order — "bring [app] to front" / "send [app] to back" without focus steal.
+    # MUST come before the bare snap patterns so "front/back/etc." aren't captured
+    # as zone names by the [\w-]+ zone group. Noun anchored with $ so
+    # "bring discord to top of monitor 2" still falls to snap A.
+    # Split: 'bring'/'move' exclude 'top' (would collide with the snap 'top' zone);
+    # raise/pop/surface include 'top' (they're not snap verbs).
+    (r"\b(?:bring|move)\s+(.+?)\s+(?:to\s+(?:the\s+)?)?"
+     r"(?:front|forward|foreground|up)$",                              wm.bring_to_front),
+    (r"\b(?:raise|pop|surface)\s+(.+?)\s+(?:to\s+(?:the\s+)?)?"
+     r"(?:front|forward|foreground|top|up)$",                          wm.bring_to_front),
+    # 'send' excludes 'bottom' (would collide with a saved 'bottom' zone);
+    # push/sink/drop include it.
+    (r"\bsend\s+(.+?)\s+(?:to\s+(?:the\s+)?)?"
+     r"(?:back|backward|background|behind|down)$",                     wm.send_to_back),
+    (r"\b(?:push|sink|drop)\s+(.+?)\s+(?:to\s+(?:the\s+)?)?"
+     r"(?:back|backward|background|bottom|behind|down)$",              wm.send_to_back),
+
+    # Bare snap — snap/move/send tolerate missing "to"; bring/put REQUIRE "to" so
+    # "bring up firefox" still routes to open_app and doesn't get misread as
+    # snap_app("up","firefox").
     (r"(?:snap|move|send)\s+(.+?)\s+(?:to\s+)?(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$", tiling.snap_app),
+    (r"(?:bring|put)\s+(.+?)\s+to\s+(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$",           tiling.snap_app),
 
     # Apps — close is graceful, kill is force-terminate
     (r"(?:open|launch|start|pull up|bring up|fire up|boot up|load up|run|start up)\s+(.+)", apps.open_app),
@@ -109,6 +247,11 @@ INTENTS = [
     (r"what(?:'?s| is) (?:the )?time",                          system.get_time),
     (r"what(?:'?s| is) (?:(?:today(?:'?s?)? )?date|day is it)", system.get_date),
 
+    # Memory recall — "what is my X" / "what's my X" / "what do you remember"
+    # Placed AFTER time/date so "what's the time" still wins (no `my` qualifier).
+    (r"\bwhat\s+do\s+you\s+remember(?:\s+about\s+(.+))?$",                                 ctx_cmd.list_memories_voice),
+    (r"\bwhat(?:'?s|\s+is)\s+my\s+(.+)$",                                                  ctx_cmd.recall_voice),
+
     # Reminders / timers
     (r"remind me in (\d+) minutes? to (.+)",                    reminders.set_reminder),
     (r"set (?:a )?timer for (\d+) minutes?",                    reminders.set_timer),
@@ -123,6 +266,17 @@ INTENTS = [
     # Volume / media
     (r"volume up",                                               system.volume_up),
     (r"volume down",                                             system.volume_down),
+
+    # ── Discord in-call (mute/deafen/disconnect) ─────────────────────────
+    # Global keybinds — no focus theft. Qualified mute/unmute only; the bare
+    # (?:mute|unmute) system pattern below still wins for plain "mute".
+    (r"\bmute\s+(?:me|myself|mic|microphone|discord|voice)\b",                                discord_cmd.mute),
+    (r"\bunmute\s+(?:me|myself|mic|microphone|discord|voice)\b",                              discord_cmd.mute),
+    (r"\bdeafen(?:\s+(?:me|myself|discord))?\b",                                              discord_cmd.deafen),
+    (r"\bundeafen(?:\s+(?:me|discord))?\b",                                                   discord_cmd.deafen),
+    (r"\b(?:disconnect|hang\s+up)(?:\s+(?:from\s+)?(?:voice|call|discord))?\b",               discord_cmd.disconnect),
+    (r"\bleave\s+(?:the\s+)?(?:voice|call|discord)\b",                                        discord_cmd.disconnect),
+
     (r"(?:mute|unmute)",                                         system.toggle_mute),
     (r"(?:pause|play|resume)",                                   system.media_play_pause),
     (r"next (?:song|track|one)",                                 system.media_next),
@@ -134,6 +288,25 @@ INTENTS = [
     (r"(?:shut down|shutdown|turn off)(?: the computer)?",       system.shutdown),
     (r"(?:go to )?sleep",                                        system.sleep_pc),
 ]
+
+
+# Bare-form z-order fallbacks — "firefox to front" / "google chrome to back".
+# App capped at 1-3 words so common phrases ("go to back", "we have to win")
+# only match when they end in an actual z-order noun. Must run BEFORE the
+# web-search intent (which treats "google ..." as a search verb), but as the
+# LAST entry in INTENTS so explicit verb forms always win.
+_BARE_ZORDER_INTENTS = [
+    (r"^([\w]+(?:\s+[\w]+){0,2})\s+to\s+(?:the\s+)?"
+     r"(?:front|forward|foreground|top|up)$",                          wm.bring_to_front),
+    (r"^([\w]+(?:\s+[\w]+){0,2})\s+to\s+(?:the\s+)?"
+     r"(?:back|backward|background|bottom|behind|down)$",              wm.send_to_back),
+]
+# Splice them in just before the web-search pattern so "google chrome to front"
+# beats "google <query>", while explicit z-order verbs higher up still win.
+_WEB_SEARCH_IDX = next(
+    i for i, (pat, h) in enumerate(INTENTS) if 'search for' in pat
+)
+INTENTS[_WEB_SEARCH_IDX:_WEB_SEARCH_IDX] = _BARE_ZORDER_INTENTS
 
 _WAKE_PREFIXES = ("hey jarvis", "hey eve", "jarvis", "eve")
 
@@ -326,6 +499,32 @@ def _try_intents(text: str):
     return None
 
 
+# Verbs Whisper sometimes glues to the next word, producing things like
+# "snapfirefox to bottom" or "openchrome". When the text begins with one of
+# these followed immediately by another letter, _try_unstick splits and retries.
+_STICK_VERBS = (
+    'snap', 'move', 'send',                    # tiling
+    'open', 'close', 'kill', 'launch', 'start', 'run',  # apps
+    'show', 'hide', 'identify', 'list',        # UI
+    'set', 'make', 'change',                   # WM mutation
+    'pin', 'put',                              # HUD move
+)
+
+
+def _try_unstick(text: str):
+    """If text starts with a known verb fused to a word ('snapfirefox'),
+    split and re-run INTENTS. Returns handler result or None."""
+    for verb in _STICK_VERBS:
+        if (text.startswith(verb)
+                and len(text) > len(verb)
+                and text[len(verb)].isalpha()):
+            corrected = verb + ' ' + text[len(verb):]
+            result = _try_intents(corrected)
+            if result is not None:
+                return result
+    return None
+
+
 def _guess_dispatch(text: str):
     """Tiered fuzzy fallback:
       1. Mishear substitutions, then retry INTENTS.
@@ -345,7 +544,13 @@ def _guess_dispatch(text: str):
         if result is not None:
             return result
 
-    # 2. prefix retry — catches bare names: "firefox", "window manager"
+    # 2. unstick — Whisper sometimes glues a verb to the next word
+    #    ("snapfirefox to bottom" -> "snap firefox to bottom")
+    result = _try_unstick(corrected)
+    if result is not None:
+        return result
+
+    # 3. prefix retry — catches bare names: "firefox", "window manager"
     prefixed = f"open {corrected}"
     result = _try_intents(prefixed)
     if result is not None:

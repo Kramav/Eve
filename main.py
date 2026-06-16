@@ -28,6 +28,10 @@ from commands.reminders import start_checker
 import commands.youtube as _yt_cmd
 import commands.system as _sys_cmd
 import commands.tiling as _tiling_cmd
+import commands.window_manager as _wm_cmd
+import commands.windows as _win_cmd
+import commands.programs as _prog_cmd
+import commands.context  as _ctx_cmd
 
 _OVERLAY_TOGGLE = re.compile(
     # Full phrase: "show/hide/close the overlay / hud / log / history"
@@ -83,6 +87,10 @@ def main():
     display.set_speaker(speaker)
     display.set_listener(listener)
     _tiling_cmd.set_display(display)
+    _wm_cmd.set_display(display)
+    _win_cmd.set_display(display)
+    _prog_cmd.set_display(display)
+    _ctx_cmd.set_display(display)
 
     _yt_cmd.set_display(display)
     _sys_cmd.set_display(display)

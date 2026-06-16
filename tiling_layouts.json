@@ -6,6 +6,7 @@
       "workY": -290,
       "workWidth": 1080,
       "workHeight": 1880,
+      "scaleFactor": 1,
       "layout": "top-bottom",
       "zones": [
         {
@@ -30,34 +31,21 @@
       "workY": 279,
       "workWidth": 1920,
       "workHeight": 1040,
-      "layout": "grid-4",
+      "scaleFactor": 1,
+      "layout": "top-bottom",
       "zones": [
         {
-          "name": "top-left",
+          "name": "top",
           "x_pct": 0,
           "y_pct": 0,
-          "w_pct": 0.5,
+          "w_pct": 1,
           "h_pct": 0.5
         },
         {
-          "name": "top-right",
-          "x_pct": 0.5,
-          "y_pct": 0,
-          "w_pct": 0.5,
-          "h_pct": 0.5
-        },
-        {
-          "name": "bottom-left",
+          "name": "bottom",
           "x_pct": 0,
           "y_pct": 0.5,
-          "w_pct": 0.5,
-          "h_pct": 0.5
-        },
-        {
-          "name": "bottom-right",
-          "x_pct": 0.5,
-          "y_pct": 0.5,
-          "w_pct": 0.5,
+          "w_pct": 1,
           "h_pct": 0.5
         }
       ]
@@ -68,6 +56,7 @@
       "workY": 0,
       "workWidth": 2048,
       "workHeight": 1112,
+      "scaleFactor": 1.25,
       "layout": "full",
       "zones": [
         {

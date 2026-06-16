@@ -18,6 +18,17 @@ function connect() {
       else if (msg.type === 'close_voice_settings') window.eve.closeVoiceSettings()
       else if (msg.type === 'snap_panel')           window.eve.snapPanel(msg.panel, msg.bounds)
       else if (msg.type === 'identify_monitors')    window.eve.identifyMonitors()
+      else if (msg.type === 'identify_zones')       window.eve.identifyZones()
+      else if (msg.type === 'identify_windows')     window.eve.identifyWindows({ windows: msg.windows })
+      else if (msg.type === 'open_command_editor')  window.eve.openCommandEditor()
+      else if (msg.type === 'close_command_editor') window.eve.closeCommandEditor()
+      else if (msg.type === 'open_programs')        window.eve.openPrograms()
+      else if (msg.type === 'close_programs')       window.eve.closePrograms()
+      else if (msg.type === 'open_memory')          window.eve.openMemory()
+      else if (msg.type === 'close_memory')         window.eve.closeMemory()
+      else if (msg.type === 'wm_apply_preset')      window.eve.wmApplyPreset(msg.monitorRef, msg.presetKey)
+      else if (msg.type === 'wm_move_hud')          window.eve.wmMoveHud(msg.monitorRef)
+      else if (msg.type === 'wm_set_orb_corner')    window.eve.wmSetOrbCorner(msg.corner)
     } catch (_) {}
   }
   ws.onclose = () => setTimeout(connect, 500)

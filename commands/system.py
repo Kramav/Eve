@@ -1,29 +1,21 @@
 import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 import pyautogui
 
-_EDITOR      = Path(__file__).parent.parent / "editor.py"
-_editor_proc = None
-
 
 def open_editor() -> str:
-    global _editor_proc
-    if _editor_proc and _editor_proc.poll() is None:
-        return "Command editor is already open"
-    _editor_proc = subprocess.Popen([sys.executable, str(_EDITOR)])
-    return "Opening command editor"
+    """Open the inline Electron command-editor panel (replaces the legacy
+    tkinter editor.py subprocess)."""
+    if _display is not None:
+        _display.open_command_editor()
+    return ""
 
 
 def close_editor() -> str:
-    global _editor_proc
-    if _editor_proc and _editor_proc.poll() is None:
-        _editor_proc.terminate()
-        _editor_proc = None
-        return "Command editor closed"
-    _editor_proc = None
-    return "Command editor isn't open"
+    if _display is not None:
+        _display.close_command_editor()
+    return ""
 
 
 def get_time() -> str:
@@ -168,4 +160,10 @@ def hide_directory() -> str:
 def identify_monitors() -> str:
     if _display is not None:
         _display.identify_monitors()
+    return ""
+
+
+def identify_zones() -> str:
+    if _display is not None:
+        _display.identify_zones()
     return ""

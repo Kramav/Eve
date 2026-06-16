@@ -10,10 +10,10 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 - **Workspace presets** — save all current window positions as a named preset, restore by voice.
   "save layout as work", "restore work layout". Store in `tiling_layouts.json` under a `workspaces` key.
   Python: `core/window_manager.py` already has `enumerate_windows()` as the foundation.
-- **Voice-config Window Manager** — Window Manager should be configurable by voice now that monitor
-  numbers are visible. Examples: "Set monitor one to 2x2 grid", "Name monitor 2 Primary display",
-  "Set HUD display to primary display", "Move HUD to monitor three", "Move HUD window 1 top-left".
-  Phase 1 (visual identify) is done; this is phase 2 — voice → WM state mutation.
+- **Custom monitor naming + per-zone targeting** — phases 1 + 2 done (visual identify and voice
+  preset application / HUD move). Remaining: "Name monitor 2 Primary display" (display-only label
+  saved in `tiling_layouts.json`) and "Move HUD window 1 top-left" (snap the routing-directory
+  panel into a specific named zone on a specific monitor by voice).
 
 ### Dialogue
 - **Generalize Converse pattern** — extend the single-turn `pending_confirm` mechanic into a full
@@ -22,11 +22,6 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
   re-matching from scratch. Pattern modeled on OVOS ConverseService. Lives in `core/session.py`
   alongside the existing `Mode` and `pending_confirm`.
 
-### UI / UX
-- **Command Editor inline UI** — replace the current external editor (`open_editor()` opens a file
-  in Notepad/VS Code) with a first-class BrowserWindow panel styled to match App Manager and
-  Window Manager. Inline editor with syntax highlighting for the custom commands JSON/YAML,
-  save button, live reload on save. Lives in `ui/src/command-editor/`.
 
 ### TTS
 - **Change TTS Tone** — default Piper voice (`en_US-lessac-medium`) sounds bad. Voice swap is now
@@ -121,6 +116,10 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 | Snap + open | "snap firefox to top" now launches Firefox AND places it in the top zone via `apps.open_app(snap_rect=...)` + `monitor.move_new_window_to_rect` |
 | Snap UI panels to zones | "snap window manager to top-left" works for routing directory, app/window/voice managers via WS `snap_panel` → IPC → `setBounds` |
 | DPI-aware tiling | Python set to PROCESS_PER_MONITOR_DPI_AWARE; Window Manager saves per-monitor `scaleFactor`; `_zone_pixel_rect(physical=...)` converts DIPs → physical px for Win32 |
+| Mixed-DPI tiling | Single `scaleFactor` multiplication is wrong when monitors have *different* scales (preceding higher-DPI monitor shifts later ones' physical x). Fix: WM saves the physical work-area rect at save time via Electron's `screen.dipToScreenRect`, which knows every monitor's individual DPI. `commands/tiling._zone_pixel_rect(physical=True)` prefers `physX/Y/Width/Height` over `workX*scaleFactor`. Re-save layouts in the WM panel (or re-trigger "set monitor N to ...") to populate the new fields |
+| Command Editor inline UI | Replaces the tkinter `editor.py` subprocess with an Eve-themed Electron panel: tabs for Commands / Apps / Aliases / Raw JSON, inline editing (no modal dialogs), 500 ms debounced auto-save, native file picker for app paths, built-in JSON syntax highlighter (textarea + tokenized `<pre>` overlay with synced scroll, Ctrl+S save), live-reload notification across windows, duplicate-phrase and invalid-row indicators. `commands.system.open_editor` is now a thin wrapper around `display.open_command_editor()`. Legacy `editor.py` left in place for one release; can be removed once stable. `ui/src/command-editor/` + 9 IPC handlers in `ui/main.js` |
+| Discord voice control | Three-mode hybrid: (1) **In-call essentials** (`mute me` / `deafen me` / `disconnect from voice`) send Discord's user-configured global keybinds via `pyautogui` — no focus theft, game/browser keeps focus; (2) **Navigation** (`next channel` / `previous server` / `open discord search`) briefly focuses Discord via `AttachThreadInput` + `SetForegroundWindow`, sends the in-app shortcut, restores previous foreground; (3) **Send message** (`tell <name> <msg>` / `dm <name> <msg>` / `send <msg> to <name> on discord`) opens quick switcher, fuzzy-finds recipient, types message, sends. Keybinds in `discord_keys.json` (user mirrors them in Discord Settings → Keybinds). `core/key_ops.py` + `commands/discord.py` + 12 INTENTS patterns positioned high so they beat snap/open-app. Bare `mute`/`unmute` still toggles system mute |
+| Persistent memory + pronoun follow-ups | (1) **Memory** — `remember my X is Y` saves to `eve_memory.json` (case-folded keys); `what is my X` recalls; `forget X` removes; `what do you remember` lists. Editable from a new **Memory** tile in the routing directory (key/value rows with 500ms debounced auto-save via `memory:set`/`delete` WS actions). (2) **Pronoun follow-ups** — `go back`/`undo that` reverts the last snap (window restored to its pre-snap rect, captured with `GetWindowRect` before `_snap_hwnd_to_rect`); `close that window` posts WM_CLOSE to the last targeted hwnd; `cancel it` invokes the last `cancelable` (currently wired for reminders/timers). Side-effecting handlers register a `LastAction` in `session.last_action` so the pronouns resolve. `core/memory.py` + `core/session.py LastAction` + `commands/context.py` + `ui/src/memory/` |
 | Multiple TTS voices | `models/voices/` directory scanned at startup; Voice Settings dropdown lists all available; live swap via speaker sentinel queue preserves speed/noise tuning across switch |
 | Filler-word tolerance | Overlay regex allows up to 2 filler words via `(?:\w+\s+){0,2}?`; `re.I` + `\s+` make it forgiving of NBSP and case |
 | Multi-aliased "hud" command | "hud", "show hud", "hide hud" all route to overlay toggle |
@@ -128,4 +127,8 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 | Single-turn confirmation | `Session.pending_confirm` stashes a callable + args; next utterance checked for yes/no; "did you mean" prompts auto-resolve |
 | Near-miss intent suggestion | Phrase similarity against intent catalog; was P2, now done as part of the tiered guess pipeline |
 | Utterance preprocessing | Centralized `_apply_mishear_subs()`; whitespace collapse + filler removal happens before regex + before catalog score |
-| Identify Monitors (visual) | "identify monitors" / WM Identify button briefly flashes a big numbered card on each display (~3.5s); primary monitor styled green. `ui/src/monitor-id/` + `identifyMonitors()` in `ui/main.js` + WS `identify_monitors` action |
+| Identify Monitors (visual) | "identify monitors" / WM Identify button briefly flashes a big numbered card in the bottom-left of each display's work area (~3.5s); primary monitor styled green. `ui/src/monitor-id/` + `identifyMonitors()` in `ui/main.js` + WS `identify_monitors` action |
+| Identify Zones (visual) | "identify zones" / "show tiling layouts" / "identify tiles" / "show segments" overlays each monitor's saved tiling layout — translucent zone boxes + zone names + layout-name tag in the top-left corner. Auto-dismiss after 6s; click any overlay to dismiss that monitor's overlay early. `ui/src/zone-id/` + `identifyZones()` in `ui/main.js` + WS `identify_zones` action |
+| Voice-config WM (preset + HUD) | "set monitor 1 to two by two grid" / "make monitor two top and bottom" / "monitor 2 grid" applies preset (full, top-bottom, left-right, main-right, main-stack, grid-4) and writes to `tiling_layouts.json`. "move HUD to monitor 3" / "set HUD to primary" / "pin orb to monitor 1" repositions the orb + persists `overlayDisplayId`. WM UI auto-refreshes if open (via `layouts-changed` IPC). `commands/window_manager.py` (resolves spoken monitor refs + preset aliases) → WS `wm_apply_preset` / `wm_move_hud` → `ui/main.js` IPC handlers |
+| Identify Windows (visual) | "identify windows" / "what's open" / "list open windows" / "show open windows" enumerates all visible top-level windows via Win32 `EnumWindows` (filtered: title, size > 200×200, exclude Eve panels + shell windows) and overlays a small numbered + labeled tag at each window's top-left corner. Auto-dismiss after 6s; click any tag to dismiss. `commands/tiling.enumerate_windows()` + `commands/windows.py` + `ui/src/window-id/` + WS `identify_windows` action |
+| Snap fallback (open-window match) | "snap discord to top" now works without Discord being in `apps.json` — `commands/tiling.snap_app` falls back to `find_window_by_spoken_name()` which scores all open windows by exe basename + window title and snaps the best match. apps.json is still required to LAUNCH apps that aren't open; the fallback covers the common case of "this app is already running" |

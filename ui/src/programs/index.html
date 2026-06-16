@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws://127.0.0.1:7734">
+  <title>Eve — Running Programs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="titlebar">
+    <span class="titlebar-title">RUNNING PROGRAMS</span>
+    <span class="titlebar-sub" id="count-label">Detecting…</span>
+  </div>
+
+  <div class="content">
+    <div class="rows" id="rows">
+      <div class="rows-empty">Scanning…</div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <span class="status-msg" id="status-msg"></span>
+    <button class="reload-btn" id="reload-btn">Refresh</button>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

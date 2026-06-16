@@ -99,8 +99,7 @@ class Display:
         elif action == 'directory_closed':
             with self._lock: self._state['hud_visible'] = False
         elif action == 'open_command_editor':
-            from commands.system import open_editor
-            open_editor()
+            self.open_command_editor()
         elif action == 'get_apps_config':
             await self._send_apps_config(ws)
         elif action == 'scan_apps':
@@ -139,6 +138,55 @@ class Display:
                 'voices':  list_voices(),
                 'current': self._speaker.current_voice_id if self._speaker else None,
             }))
+
+        # ── Running Programs panel ──────────────────────────────────────
+        elif action == 'programs:get_list':
+            from commands import programs as _progs
+            payload = json.dumps({
+                'type':  'programs_list',
+                'items': _progs.get_panel_payload(),
+            })
+            await self._push_one(ws, payload)
+        elif action == 'programs:bring_front':
+            from core.window_ops import raise_to_top_no_focus
+            raise_to_top_no_focus(int(data.get('hwnd', 0)))
+        elif action == 'programs:send_back':
+            from core.window_ops import send_to_bottom
+            send_to_bottom(int(data.get('hwnd', 0)))
+        elif action == 'programs:close':
+            import ctypes as _c
+            _c.windll.user32.PostMessageW(int(data.get('hwnd', 0)), 0x0010, 0, 0)  # WM_CLOSE
+        elif action == 'programs:add_to_apps':
+            from commands import programs as _progs
+            result = _progs.add_to_apps(
+                data.get('name', ''),
+                data.get('exe',  ''),
+                data.get('path', ''),
+            )
+            await self._push_one(ws, json.dumps({
+                'type':   'programs_add_result',
+                'ok':     bool(result.get('ok')),
+                'error':  result.get('error', ''),
+                'name':   data.get('name', ''),
+            }))
+
+        # ── Memory panel ────────────────────────────────────────────────
+        elif action == 'memory:get_all':
+            from core import memory as _mem
+            await self._push_one(ws, json.dumps({
+                'type':  'memory_all',
+                'items': _mem.all_memories(),
+            }))
+        elif action == 'memory:set':
+            from core import memory as _mem
+            _mem.remember(data.get('key', ''), data.get('value', ''))
+            payload = json.dumps({'type': 'memory_all', 'items': _mem.all_memories()})
+            await self._push_all(payload)
+        elif action == 'memory:delete':
+            from core import memory as _mem
+            _mem.forget(data.get('key', ''))
+            payload = json.dumps({'type': 'memory_all', 'items': _mem.all_memories()})
+            await self._push_all(payload)
 
     def _broadcast(self):
         payload = self._snapshot()
@@ -304,6 +352,72 @@ class Display:
     def identify_monitors(self):
         """Briefly flash a big numbered card on each monitor for UX clarity."""
         payload = json.dumps({'type': 'identify_monitors'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def identify_zones(self):
+        """Briefly overlay the saved tiling layout on each monitor that has one."""
+        payload = json.dumps({'type': 'identify_zones'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def wm_apply_preset(self, monitor_ref: str, preset_key: str):
+        """Voice WM control: apply a preset layout to the named monitor.
+        monitor_ref is '1'..'10' or 'primary'; Electron resolves to a display."""
+        payload = json.dumps({
+            'type':       'wm_apply_preset',
+            'monitorRef': str(monitor_ref),
+            'presetKey':  str(preset_key),
+        })
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def wm_move_hud(self, monitor_ref: str):
+        """Voice WM control: pin the HUD overlay to the named monitor."""
+        payload = json.dumps({
+            'type':       'wm_move_hud',
+            'monitorRef': str(monitor_ref),
+        })
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def wm_set_orb_corner(self, corner: str):
+        """Voice WM control: pin the orb (and routing-directory anchor) to a
+        corner of the current HUD monitor. *corner* is one of
+        'top-right', 'top-left', 'bottom-right', 'bottom-left'."""
+        payload = json.dumps({
+            'type':   'wm_set_orb_corner',
+            'corner': str(corner),
+        })
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def open_programs(self):
+        """Open the Running Programs Electron panel."""
+        payload = json.dumps({'type': 'open_programs'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def close_programs(self):
+        payload = json.dumps({'type': 'close_programs'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def open_memory(self):
+        """Open the Memory editor panel."""
+        payload = json.dumps({'type': 'open_memory'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def close_memory(self):
+        payload = json.dumps({'type': 'close_memory'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def identify_windows(self, windows: list):
+        """Briefly overlay numbered labels on every visible top-level window.
+        *windows* is a list of {index, label, title, x, y, w, h} dicts."""
+        payload = json.dumps({'type': 'identify_windows', 'windows': windows})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def open_command_editor(self):
+        """Open the inline Electron-based command editor."""
+        payload = json.dumps({'type': 'open_command_editor'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def close_command_editor(self):
+        payload = json.dumps({'type': 'close_command_editor'})
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
 
     # ── Public API: HUD state (same interface as before) ────────────────────

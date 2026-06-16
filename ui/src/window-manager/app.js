@@ -333,5 +333,21 @@ if (window.eve && window.eve.onDisplaysChanged) {
   })
 }
 
+// ── Voice-driven layout changes: refresh state without losing selection ─────
+if (window.eve && window.eve.onLayoutsChanged) {
+  window.eve.onLayoutsChanged(async () => {
+    try {
+      tilingLayouts = await window.eve.getTilingLayouts()
+      // If the currently selected monitor was the one updated, sync the preset
+      if (selectedId && tilingLayouts.monitors && tilingLayouts.monitors[String(selectedId)]) {
+        selectedPreset = tilingLayouts.monitors[String(selectedId)].layout
+      }
+      renderLayout()
+      if (selectedId) renderPresetGrid()
+      setStatus('Layout updated by voice', 'ok')
+    } catch {}
+  })
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 loadAndRender()

@@ -3,5 +3,7 @@
     "speed": 1.35,
     "noise_scale": 0.8,
     "noise_w": 0.75
-  }
+  },
+  "overlayDisplayId": 3804309905,
+  "overlayCorner": "bottom-left"
 }
