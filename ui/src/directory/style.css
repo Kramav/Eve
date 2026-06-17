@@ -166,6 +166,75 @@ body.offline .state-label { color: var(--red); }
 .module-label { font-size: 9px; letter-spacing: 2px; color: var(--dim); text-transform: uppercase; }
 .module-tile:hover .module-label { color: var(--accent); }
 
+/* ── Section header ──────────────────────────────────────────────────── */
+.section-hdr {
+  padding: 8px 14px 4px;
+  flex-shrink: 0;
+}
+.section-hdr-label {
+  font-size: 8px;
+  letter-spacing: 3px;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+/* ── Feature toggles ─────────────────────────────────────────────────── */
+.feature-list {
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.feature-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 14px;
+  border-top: 1px solid var(--sep);
+}
+.feature-row:first-child { border-top: none; }
+
+.feature-label {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.feature-toggle {
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 2px;
+  font-weight: bold;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 9px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+  min-width: 42px;
+  text-align: center;
+}
+.feature-toggle.on  {
+  background: rgba(0, 232, 122, 0.10);
+  border-color: rgba(0, 232, 122, 0.35);
+  color: var(--green);
+}
+.feature-toggle.off {
+  background: rgba(255, 80, 80, 0.08);
+  border-color: rgba(255, 80, 80, 0.25);
+  color: var(--red);
+}
+.feature-toggle.unavailable {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--dim);
+  cursor: not-allowed;
+  font-size: 8px;
+  letter-spacing: 1.5px;
+}
+.feature-toggle:not(.unavailable):hover { opacity: 0.75; }
+
+.feature-row-unavailable .feature-label {
+  color: var(--dim);
+}
+
 /* ── Status strip ────────────────────────────────────────────────────── */
 .status-strip {
   display: flex;

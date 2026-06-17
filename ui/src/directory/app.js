@@ -116,7 +116,75 @@ function applyState(s) {
     prev.listKey = listKey
   }
 
+  if (s.features) renderFeatures(s.features, s.feature_labels || {}, s.feature_status || {}, s.feature_reasons || {})
+
   prev = { mode: s.mode, status_text: s.status_text, main_text: s.main_text, listKey: prev.listKey, enabled: enabled }
+}
+
+// ── Feature toggles ──────────────────────────────────────────────────────────
+let _featureState   = {}
+let _featureStatus  = {}
+let _featureReasons = {}
+
+function renderFeatures(features, labels, status, reasons) {
+  status  = status  || {}
+  reasons = reasons || {}
+  const list = document.getElementById('feature-list')
+  const keys = Object.keys(features)
+
+  // First render: build rows
+  if (list.children.length !== keys.length) {
+    list.innerHTML = ''
+    for (const key of keys) {
+      const row = document.createElement('div')
+      row.className   = 'feature-row'
+      row.dataset.key = key
+
+      const lbl = document.createElement('span')
+      lbl.className   = 'feature-label'
+      lbl.textContent = labels[key] || key
+
+      const tog = document.createElement('button')
+      tog.className = 'feature-toggle'
+      tog.addEventListener('click', () => {
+        if (tog.dataset.status !== 'unavailable') send('toggle_feature', { key })
+      })
+
+      row.append(lbl, tog)
+      list.appendChild(row)
+    }
+  }
+
+  // Update each row
+  for (const key of keys) {
+    const avail   = (status[key] || 'ok') === 'ok'
+    const enabled = features[key]
+    const changed = _featureState[key] !== enabled || _featureStatus[key] !== status[key]
+    if (!changed) continue
+
+    _featureState[key]  = enabled
+    _featureStatus[key] = status[key]
+
+    const row = list.querySelector(`[data-key="${key}"]`)
+    if (!row) continue
+
+    const tog = row.querySelector('.feature-toggle')
+    tog.dataset.status = avail ? 'ok' : 'unavailable'
+
+    if (!avail) {
+      tog.textContent  = 'UNAVAILABLE'
+      tog.className    = 'feature-toggle unavailable'
+      tog.title        = reasons[key] || 'Feature unavailable'
+      tog.disabled     = true
+      row.classList.add('feature-row-unavailable')
+    } else {
+      tog.textContent  = enabled ? 'ON' : 'OFF'
+      tog.className    = `feature-toggle ${enabled ? 'on' : 'off'}`
+      tog.title        = ''
+      tog.disabled     = false
+      row.classList.remove('feature-row-unavailable')
+    }
+  }
 }
 
 function appendEntry(e) {

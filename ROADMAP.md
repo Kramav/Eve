@@ -1,6 +1,33 @@
 # Eve — Feature Roadmap
 
-Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future consideration)
+Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2** (soon) → **P3** (future consideration)
+
+---
+
+## P0 — Public Release Blockers
+
+> These must be resolved before Eve can be shared publicly or accept outside contributors.
+
+### 1. License
+Add a `LICENSE` file (MIT recommended). Without one, no one can legally use or contribute to the project.
+
+### 2. First-run experience
+New users currently must: install Python 3.14, install Node, run `npm install`, manually download an `.onnx` voice model from Hugging Face, run a separate wake word download command, and hand-edit `apps.json`. A setup script (`setup.ps1` or `setup.py`) should automate: voice model download, wake word model download, and `npm install` in `ui/`. Goal: `git clone` → run one command → `python main.py` works.
+
+### 3. Platform scope decision
+Eve is deeply Windows-specific (pyautogui, win32 APIs, Electron shell calls, `.lnk` scanning). **Decide: lean in and own "best voice assistant for Windows," or scope out Win32 dependencies for cross-platform support.** Either is valid — but the choice drives architecture decisions downstream.
+
+### 4. Test suite
+The dispatcher has 30+ regex patterns and zero tests. Contributors will silently break intent routing. Minimum viable: a pytest file that covers each regex in `INTENTS` and key dispatch paths.
+
+### 5. Plugin/skill system
+Adding a new command currently requires editing `core/dispatcher.py` directly. External contributors need a way to drop in a skill file without touching core. See P3 "Skill entry points" — promote to P0 for public release.
+
+### 6. Remove hardcoded assumptions
+Port `7734`, `hey_jarvis` as default wake word, and several file paths are hardcoded outside of `config.py`. All user-facing settings should be overridable from `config.py` or `settings.json`.
+
+### 7. Distribution
+A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manifest) is the difference between "developers only" and "anyone can install it." Inno Setup or NSIS can wrap the Electron build + Python env into a single installer.
 
 ---
 
@@ -38,7 +65,8 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
   route to a local Ollama model instead of returning "not recognized." Config: `FALLBACK_LLM = "ollama"`
   / `"none"`. Model: `llama3` or `mistral`. Keeps Eve useful for general questions without cloud
   dependency. Add at bottom of `dispatch()` in `core/dispatcher.py`, just before the final
-  "Not recognized" return.
+  "Not recognized" return. **Higher priority if going public** — "not recognized" frequently will
+  frustrate users who can't add custom commands.
 
 ### Tiling / Window Management
 - **Auto-snap on launch** — if an app has a saved zone assignment, auto-snap it when opened via
@@ -61,8 +89,7 @@ Priority tiers: **P1** (next up) → **P2** (soon) → **P3** (future considerat
 - **STT abstraction layer** — abstract `core/transcriber.py` behind an `STTEngine` interface.
   Allows swapping Whisper for Vosk (faster/smaller) or cloud STT via config, no code change.
 - **Skill entry points** — dynamic plugin loading via `pyproject.toml` entry points instead of
-  hardcoded imports. Enables external custom skill packages. Only relevant if Eve becomes
-  multi-user or shareable.
+  hardcoded imports. Enables external custom skill packages. **Promoted to P0 if going public.**
 - **Testing framework** — pytest suite for dispatcher regex patterns, integration tests for
   multi-step commands. Catch regressions when adding new intents.
 

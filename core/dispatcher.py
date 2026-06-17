@@ -14,6 +14,7 @@ def _send_to_discord(text, recipient):
     return discord_cmd.send_message(recipient, text)
 import core.session as _sess_mod
 from core.session import Mode
+from core import features as _features
 
 _COMMANDS_FILE = Path(__file__).parent.parent / "custom_commands.json"
 _ALIASES_FILE  = Path(__file__).parent.parent / "aliases.json"
@@ -289,7 +290,6 @@ INTENTS = [
     (r"(?:go to )?sleep",                                        system.sleep_pc),
 ]
 
-
 # Bare-form z-order fallbacks — "firefox to front" / "google chrome to back".
 # App capped at 1-3 words so common phrases ("go to back", "we have to win")
 # only match when they end in an actual z-order noun. Must run BEFORE the
@@ -307,6 +307,25 @@ _WEB_SEARCH_IDX = next(
     i for i, (pat, h) in enumerate(INTENTS) if 'search for' in pat
 )
 INTENTS[_WEB_SEARCH_IDX:_WEB_SEARCH_IDX] = _BARE_ZORDER_INTENTS
+
+# Maps handler → feature key so disabled features are silently skipped.
+# Looked up by dispatch() inside the INTENTS loop: if the matched handler's
+# feature is OFF (or unavailable), the match is treated as if it never fired
+# and dispatch continues to the next pattern.
+_HANDLER_FEATURE = {
+    youtube.browse_home_intent: 'youtube',
+    youtube.play_query_intent:  'youtube',
+    search.go_to_site:          'web_search',
+    search.web_search_list:     'web_search',
+    reminders.set_reminder:     'reminders',
+    reminders.set_timer:        'reminders',
+    reminders.list_reminders:   'reminders',
+    reminders.cancel_all:       'reminders',
+    apps.open_app:              'apps',
+    apps.close_app:             'apps',
+    apps.kill_app:              'apps',
+    tiling.snap_app:            'tiling',
+}
 
 _WAKE_PREFIXES = ("hey jarvis", "hey eve", "jarvis", "eve")
 
@@ -494,6 +513,9 @@ def _try_intents(text: str):
     for pattern, handler in INTENTS:
         m = re.search(pattern, text)
         if m:
+            feat = _HANDLER_FEATURE.get(handler)
+            if feat and not _features.get(feat):
+                continue
             groups = m.groups()
             return handler(*groups) if groups else handler()
     return None
@@ -617,11 +639,11 @@ def dispatch(text: str):
 
     # --- State-aware routing ---
     sess = _sess_mod.get()
-    if sess.mode == Mode.LISTING:
+    if sess.mode == Mode.LISTING and _features.get('youtube'):
         result = _dispatch_listing(text)
         if result is not None:
             return result
-    elif sess.mode == Mode.PLAYING:
+    elif sess.mode == Mode.PLAYING and _features.get('youtube'):
         result = _dispatch_playing(text)
         if result is not None:
             return result

@@ -1,0 +1,112 @@
+import json
+import shutil
+import threading
+from pathlib import Path
+
+_FILE = Path(__file__).parent.parent / 'features.json'
+
+DEFAULTS = {
+    'tts':        True,
+    'youtube':    True,
+    'web_search': True,
+    'reminders':  True,
+    'apps':       True,
+    'tiling':     True,
+}
+
+# Human-readable labels sent to the UI
+LABELS = {
+    'tts':        'Text-to-Speech',
+    'youtube':    'YouTube',
+    'web_search': 'Web Search',
+    'reminders':  'Reminders & Timers',
+    'apps':       'App Launcher',
+    'tiling':     'Window Tiling',
+}
+
+# Why a feature is unavailable — shown as a tooltip in the UI
+_UNAVAILABLE_REASONS = {
+    'youtube': 'mpv not found on PATH — install with: winget install mpv',
+    'tts':     'Voice model missing — run setup.py to download it',
+}
+
+_lock   = threading.Lock()
+_state:  dict = {}
+_status: dict = {}   # 'ok' | 'unavailable' per feature key
+
+
+# ── user preference store ────────────────────────────────────────────────────
+
+def _load():
+    global _state
+    try:
+        _state = {**DEFAULTS, **json.loads(_FILE.read_text())}
+    except Exception:
+        _state = dict(DEFAULTS)
+
+
+def get(key: str) -> bool:
+    """True only if the feature is user-enabled AND runtime-available."""
+    return bool(_state.get(key, True)) and _status.get(key, 'ok') == 'ok'
+
+
+def set_feature(key: str, value: bool):
+    with _lock:
+        _state[key] = bool(value)
+        try:
+            _FILE.write_text(json.dumps(_state, indent=2))
+        except Exception:
+            pass
+
+
+def all_features() -> dict:
+    return dict(_state)
+
+
+# ── runtime availability checks ──────────────────────────────────────────────
+
+def _compute_status() -> dict:
+    status = {}
+
+    # YouTube: requires mpv on PATH
+    status['youtube'] = 'ok' if shutil.which('mpv') else 'unavailable'
+
+    # TTS: requires the .onnx voice model file
+    try:
+        from config import TTS_DEFAULT_VOICE, TTS_VOICES_DIR
+        onnx = Path(TTS_VOICES_DIR) / f'{TTS_DEFAULT_VOICE}.onnx'
+        status['tts'] = 'ok' if onnx.exists() else 'unavailable'
+    except Exception:
+        status['tts'] = 'unavailable'
+
+    # All other features are pure Python — always available
+    for key in DEFAULTS:
+        if key not in status:
+            status[key] = 'ok'
+
+    return status
+
+
+def refresh_status():
+    """Re-check runtime availability of all features. Called at startup and on demand."""
+    global _status
+    _status = _compute_status()
+
+
+def get_status(key: str) -> str:
+    """Returns 'ok' or 'unavailable'."""
+    return _status.get(key, 'ok')
+
+
+def all_status() -> dict:
+    return dict(_status)
+
+
+def unavailable_reason(key: str) -> str:
+    return _UNAVAILABLE_REASONS.get(key, 'Feature unavailable')
+
+
+# ── init ─────────────────────────────────────────────────────────────────────
+
+_load()
+refresh_status()

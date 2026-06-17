@@ -24,6 +24,7 @@ from core.speaker import Speaker
 from core.display import Display
 from core.response import Silent, VideoList, SiteList
 from core.session import get as _get_session, Mode as _Mode
+from core import features as _features
 from commands.reminders import start_checker
 import commands.youtube as _yt_cmd
 import commands.system as _sys_cmd
@@ -199,7 +200,8 @@ def main():
             if response:
                 display.update(status="Eve", text=response, color="processing")
                 display.log("action", response)
-                speaker.speak(response)
+                if _features.get('tts'):
+                    speaker.speak(response)
 
         except Exception as e:
             print(f"Command error: {e}")
