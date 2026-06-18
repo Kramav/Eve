@@ -37,6 +37,8 @@ contextBridge.exposeInMainWorld('eve', {
   closePrograms:       () => ipcRenderer.send('close-programs'),
   openMemory:          () => ipcRenderer.send('open-memory'),
   closeMemory:         () => ipcRenderer.send('close-memory'),
+  openReminders:       () => ipcRenderer.send('open-reminders'),
+  closeReminders:      () => ipcRenderer.send('close-reminders'),
   ceGetCommands:       ()       => ipcRenderer.invoke('command-editor:get-commands'),
   ceSetCommands:       (data)   => ipcRenderer.invoke('command-editor:set-commands', data),
   ceGetApps:           ()       => ipcRenderer.invoke('command-editor:get-apps'),

@@ -26,6 +26,8 @@ function connect() {
       else if (msg.type === 'close_programs')       window.eve.closePrograms()
       else if (msg.type === 'open_memory')          window.eve.openMemory()
       else if (msg.type === 'close_memory')         window.eve.closeMemory()
+      else if (msg.type === 'open_reminders')       window.eve.openReminders()
+      else if (msg.type === 'close_reminders')      window.eve.closeReminders()
       else if (msg.type === 'wm_apply_preset')      window.eve.wmApplyPreset(msg.monitorRef, msg.presetKey)
       else if (msg.type === 'wm_move_hud')          window.eve.wmMoveHud(msg.monitorRef)
       else if (msg.type === 'wm_set_orb_corner')    window.eve.wmSetOrbCorner(msg.corner)

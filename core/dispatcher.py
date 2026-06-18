@@ -233,6 +233,13 @@ INTENTS = [
     (r"(?:snap|move|send)\s+(.+?)\s+(?:to\s+)?(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$", tiling.snap_app),
     (r"(?:bring|put)\s+(.+?)\s+to\s+(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$",           tiling.snap_app),
 
+    # Timer creation — MUST come before the Apps open intent, whose verb list
+    # includes "start"/"run", so "start a 10 minute timer" isn't read as
+    # opening an app called "a 10 minute timer".
+    # "set a timer for 5 minutes" / "set timer 5 minutes" / "start a 5 minute timer"
+    (r"(?:set|start|begin|create)\s+(?:a\s+)?timer\s+(?:for\s+|of\s+)?(\d+)\s+minutes?",  reminders.set_timer),
+    (r"(?:set|start|begin|create)\s+(?:a\s+)?(\d+)[\s-]+minutes?\s+timer",                reminders.set_timer),
+
     # Apps — close is graceful, kill is force-terminate
     (r"(?:open|launch|start|pull up|bring up|fire up|boot up|load up|run|start up)\s+(.+)", apps.open_app),
     (r"(?:close|quit|exit)\s+(.+)",                               apps.close_app),
@@ -245,7 +252,7 @@ INTENTS = [
     (r"(?:search for|look up|google|search|find)\s+(.+)",         search.web_search_list),
 
     # Date / time
-    (r"what(?:'?s| is) (?:the )?time",                          system.get_time),
+    (r"what(?:'?s| is) (?:the )?time|what time is it",          system.get_time),
     (r"what(?:'?s| is) (?:(?:today(?:'?s?)? )?date|day is it)", system.get_date),
 
     # Memory recall — "what is my X" / "what's my X" / "what do you remember"
@@ -254,8 +261,12 @@ INTENTS = [
     (r"\bwhat(?:'?s|\s+is)\s+my\s+(.+)$",                                                  ctx_cmd.recall_voice),
 
     # Reminders / timers
+    # Reminders panel (visual) — before the speak-list and generic "remind me".
+    (r"(?:open|show|edit)\s+(?:the\s+|my\s+)?reminders?(?:\s+(?:panel|list|manager))?$",  ctx_cmd.open_reminders_panel),
     (r"remind me in (\d+) minutes? to (.+)",                    reminders.set_reminder),
-    (r"set (?:a )?timer for (\d+) minutes?",                    reminders.set_timer),
+    # Absolute / recurring / multi-turn: "remind me to call mom at 3pm",
+    # "remind me to stretch every day at 8", "remind me to take pills" (→ "when?")
+    (r"remind me (?:to |that |about )?(.+)",                    ctx_cmd.remind),
     (r"(?:what are my reminders|list reminders|any reminders)",  reminders.list_reminders),
     (r"cancel (?:all )?(?:my )?(?:reminders|timers)",           reminders.cancel_all),
 
@@ -619,6 +630,32 @@ def _handle_confirmation(text: str):
     return None
 
 
+def _handle_converse(text: str):
+    """Give an active converse context first crack at the utterance, ahead of
+    normal intent matching. Returns the handler's response if it claims the
+    utterance, else None to fall through. Expired or erroring contexts are
+    cleared; a clean decline leaves the context in place for a later, clearer
+    follow-up (it still decays via TTL)."""
+    sess = _sess_mod.get()
+    conv = sess.converse
+    if conv is None:
+        return None
+    if not conv.alive():
+        sess.converse = None
+        return None
+    try:
+        result = conv.handler(text)
+    except Exception:
+        sess.converse = None
+        return None
+    if result is None:
+        return None
+    conv.touch()
+    if not conv.alive():
+        sess.converse = None
+    return result
+
+
 def dispatch(text: str):
     text = text.strip().lower()
     text = re.sub(r"[.,!?]+$", "", text).strip()  # strip trailing punctuation Whisper adds
@@ -636,6 +673,15 @@ def dispatch(text: str):
     confirmed = _handle_confirmation(text)
     if confirmed is not None:
         return confirmed
+
+    # --- Active converse context? ---
+    # A handler (e.g. a just-set timer) may have claimed upcoming utterances so
+    # follow-ups like "cancel it" / "add 2 minutes" route straight back to it
+    # without re-matching from scratch. Runs before normal routing; declines
+    # fall through.
+    claimed = _handle_converse(text)
+    if claimed is not None:
+        return claimed
 
     # --- State-aware routing ---
     sess = _sess_mod.get()

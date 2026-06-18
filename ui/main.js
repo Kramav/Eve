@@ -16,6 +16,7 @@ let voiceSettingsWin  = null
 let commandEditorWin  = null
 let programsWin       = null
 let memoryWin         = null
+let remindersWin      = null
 let tray             = null
 let _savedDirBounds  = null
 
@@ -441,6 +442,30 @@ function openMemory() {
 ipcMain.on('open-memory',  openMemory)
 ipcMain.on('close-memory', () => {
   if (memoryWin && !memoryWin.isDestroyed()) memoryWin.close()
+})
+
+// ── Reminders panel ───────────────────────────────────────────────────────────
+
+function openReminders() {
+  if (remindersWin && !remindersWin.isDestroyed()) { remindersWin.focus(); return }
+  remindersWin = new BrowserWindow({
+    width: 600, height: 520, minWidth: 500, minHeight: 360,
+    title: 'Eve — Reminders',
+    backgroundColor: '#080e18',
+    frame: true, resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+    },
+  })
+  remindersWin.setMenuBarVisibility(false)
+  remindersWin.loadFile(path.join(__dirname, 'src', 'reminders', 'index.html'))
+  remindersWin.on('closed', () => { remindersWin = null })
+}
+
+ipcMain.on('open-reminders',  openReminders)
+ipcMain.on('close-reminders', () => {
+  if (remindersWin && !remindersWin.isDestroyed()) remindersWin.close()
 })
 
 // Read/write helpers for the three editor files

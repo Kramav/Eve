@@ -42,14 +42,6 @@ A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manif
   saved in `tiling_layouts.json`) and "Move HUD window 1 top-left" (snap the routing-directory
   panel into a specific named zone on a specific monitor by voice).
 
-### Dialogue
-- **Generalize Converse pattern** — extend the single-turn `pending_confirm` mechanic into a full
-  converse layer so any command handler (timers, reminders, video playback) can claim follow-up
-  utterances. Example: "set timer 5 minutes" → "cancel it" routes back to the timer handler without
-  re-matching from scratch. Pattern modeled on OVOS ConverseService. Lives in `core/session.py`
-  alongside the existing `Mode` and `pending_confirm`.
-
-
 ### TTS
 - **Change TTS Tone** — default Piper voice (`en_US-lessac-medium`) sounds bad. Voice swap is now
   fully wired (drop `.onnx` + `.onnx.json` pair into `models/voices/`, pick from Voice Settings
@@ -96,8 +88,6 @@ A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manif
 ### Voice / UX
 - **Wake word customization** — allow users to set a custom wake word via the App Manager UI
   rather than editing `config.py`. Store in `settings.json`.
-- **Multi-turn reminders** — "remind me to check email" → "when?" → "at 3pm". Requires
-  generalized Converse pattern (P1) first.
 - **Confidence scores** — return confidence alongside responses; surface low-confidence matches
   with a confirmation prompt rather than executing blindly. (Partly done — see `intent_match.py`
   tiered confidence; could be extended to in-pipeline intents.)
@@ -159,3 +149,5 @@ A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manif
 | Voice-config WM (preset + HUD) | "set monitor 1 to two by two grid" / "make monitor two top and bottom" / "monitor 2 grid" applies preset (full, top-bottom, left-right, main-right, main-stack, grid-4) and writes to `tiling_layouts.json`. "move HUD to monitor 3" / "set HUD to primary" / "pin orb to monitor 1" repositions the orb + persists `overlayDisplayId`. WM UI auto-refreshes if open (via `layouts-changed` IPC). `commands/window_manager.py` (resolves spoken monitor refs + preset aliases) → WS `wm_apply_preset` / `wm_move_hud` → `ui/main.js` IPC handlers |
 | Identify Windows (visual) | "identify windows" / "what's open" / "list open windows" / "show open windows" enumerates all visible top-level windows via Win32 `EnumWindows` (filtered: title, size > 200×200, exclude Eve panels + shell windows) and overlays a small numbered + labeled tag at each window's top-left corner. Auto-dismiss after 6s; click any tag to dismiss. `commands/tiling.enumerate_windows()` + `commands/windows.py` + `ui/src/window-id/` + WS `identify_windows` action |
 | Snap fallback (open-window match) | "snap discord to top" now works without Discord being in `apps.json` — `commands/tiling.snap_app` falls back to `find_window_by_spoken_name()` which scores all open windows by exe basename + window title and snaps the best match. apps.json is still required to LAUNCH apps that aren't open; the fallback covers the common case of "this app is already running" |
+| Converse pattern (multi-turn) | Generalized the single-turn `pending_confirm` into a full converse layer modeled on OVOS ConverseService. `core/session.py` gains a `Converse` dataclass (handler + `turns` budget + `ttl` decay) + `start_converse()`/`clear_converse()`; `core/dispatcher._handle_converse()` gives an active context first crack at each utterance (after the yes/no confirm check, before normal routing) — a clean decline falls through and leaves the context for a later, clearer follow-up. Demonstrated on timers: `set timer 5 minutes` claims follow-ups so `cancel it` / `add 2 minutes` / `make it 10 minutes` / `how long left` route back to the timer handler. Reminders gained id-targeted `cancel_one` / `_reschedule` / `_remaining_minutes`. Also widened timer-create phrasing ("set timer 5 minutes", "start a 5 minute timer") and moved those intents above the apps-open intent so "start" isn't read as an app launch; broadened the time intent to accept "what time is it" |
+| Reminders: absolute / recurring / multi-turn / UI | New `core/timeparse.py` (dependency-free) parses absolute ("at 3pm", "tomorrow at 9", "monday at 8"), relative ("in 5 minutes"), and recurring ("every weekday at 7am", "every 30 minutes", "every morning") phrases, plus `split()` to separate a task from its time tail. `commands/reminders.py` rewritten: entries gain `id` + `recurrence`; checker re-arms recurring reminders (daily/weekly/interval) and marks one-shots done; `schedule()` / `panel_set()` / `cancel_one()` / `get_panel_payload()`. Multi-turn: bare "remind me to X" asks "When?" and the converse layer captures the time answer (`commands/context.remind`). New intents: `remind me to … (at/every/tomorrow …)` → `ctx.remind`, `open/show reminders` → panel. New Electron **Reminders** panel (`ui/src/reminders/`, directory tile, `display.open_reminders` + `reminders:get_all/set/delete/cancel_all` WS actions, live refresh via `display.reminders_changed` from the checker `on_change` hook) — Task + natural-language When fields, debounced auto-save, recurring ↻ badge, mirrors the Memory panel |

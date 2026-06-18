@@ -4,6 +4,7 @@ const MODULES = [
   { id: 'window-manager', label: 'Window Manager',    icon: '⬢', action: () => window.eve.openWindowManager() },
   { id: 'programs',       label: 'Running Programs',  icon: '◉', action: () => window.eve.openPrograms()       },
   { id: 'memory',         label: 'Memory',            icon: '✦', action: () => window.eve.openMemory()         },
+  { id: 'reminders',      label: 'Reminders',         icon: '⏰', action: () => window.eve.openReminders()      },
   { id: 'commands',       label: 'Command Editor',    icon: '⌨', action: () => send('open_command_editor')    },
   { id: 'voice-settings', label: 'Voice Settings',    icon: '◈', action: () => window.eve.openVoiceSettings() },
 ]

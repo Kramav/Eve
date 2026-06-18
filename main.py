@@ -106,7 +106,7 @@ def main():
         time.sleep(3)
         display.hide()
 
-    start_checker(on_reminder)
+    start_checker(on_reminder, on_change=display.reminders_changed)
 
     print("Ready. Say 'Hey Jarvis' to wake Eve up.")
     display.show(status="Ready  —  say Hey Jarvis", text="", color="idle")

@@ -208,6 +208,41 @@ class Display:
             payload = json.dumps({'type': 'memory_all', 'items': _mem.all_memories()})
             await self._push_all(payload)
 
+        # ── Reminders panel ─────────────────────────────────────────────
+        elif action == 'reminders:get_all':
+            from commands import reminders as _rem
+            await self._push_one(ws, json.dumps({
+                'type':  'reminders_all',
+                'items': _rem.get_panel_payload(),
+            }))
+        elif action == 'reminders:set':
+            from commands import reminders as _rem
+            result = _rem.panel_set(
+                data.get('id', ''),
+                data.get('message', ''),
+                data.get('when', ''),
+            )
+            await self._push_one(ws, json.dumps({
+                'type':  'reminders_set_result',
+                'ok':    bool(result.get('ok')),
+                'error': result.get('error', ''),
+            }))
+            await self._push_all(json.dumps({
+                'type': 'reminders_all', 'items': _rem.get_panel_payload(),
+            }))
+        elif action == 'reminders:delete':
+            from commands import reminders as _rem
+            _rem.cancel_one(data.get('id', ''))
+            await self._push_all(json.dumps({
+                'type': 'reminders_all', 'items': _rem.get_panel_payload(),
+            }))
+        elif action == 'reminders:cancel_all':
+            from commands import reminders as _rem
+            _rem.cancel_all()
+            await self._push_all(json.dumps({
+                'type': 'reminders_all', 'items': _rem.get_panel_payload(),
+            }))
+
     def _broadcast(self):
         payload = self._snapshot()
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
@@ -423,6 +458,24 @@ class Display:
 
     def close_memory(self):
         payload = json.dumps({'type': 'close_memory'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def open_reminders(self):
+        """Open the Reminders editor panel."""
+        payload = json.dumps({'type': 'open_reminders'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def close_reminders(self):
+        payload = json.dumps({'type': 'close_reminders'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def reminders_changed(self):
+        """Broadcast the current reminder list so an open panel refreshes.
+        Called from the background checker when a reminder fires/re-arms."""
+        from commands import reminders as _rem
+        payload = json.dumps({
+            'type': 'reminders_all', 'items': _rem.get_panel_payload(),
+        })
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
 
     def identify_windows(self, windows: list):
