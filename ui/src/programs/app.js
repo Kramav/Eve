@@ -21,9 +21,18 @@ function send(action, data = {}) {
 }
 function requestList() { send('programs:get_list') }
 connect()
+// Auto-refresh so the list stays live without the reload button.
+// ponytail: re-renders only when the list actually changes (signature check
+// in applyList). If a *changed* list still flickers, diff rows by hwnd.
+setInterval(requestList, 3000)
 
 // ── Render ────────────────────────────────────────────────────────────────────
+let _sig = null
 function applyList(list) {
+  // Skip the re-render when nothing changed — kills the every-3s flicker.
+  const sig = JSON.stringify(list)
+  if (sig === _sig) return
+  _sig = sig
   items = list
   document.getElementById('count-label').textContent =
     `${list.length} detected`

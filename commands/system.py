@@ -9,13 +9,13 @@ def open_editor() -> str:
     tkinter editor.py subprocess)."""
     if _display is not None:
         _display.open_command_editor()
-    return ""
+    return "Opening command editor"
 
 
 def close_editor() -> str:
     if _display is not None:
         _display.close_command_editor()
-    return ""
+    return "Closing command editor"
 
 
 def get_time() -> str:
@@ -160,22 +160,22 @@ def open_voice_settings() -> str:
 def show_directory() -> str:
     if _display is not None:
         _display.show_directory()
-    return ""
+    return "Showing the directory"
 
 
 def hide_directory() -> str:
     if _display is not None:
         _display.hide_directory()
-    return ""
+    return "Hiding the directory"
 
 
 def identify_monitors() -> str:
     if _display is not None:
         _display.identify_monitors()
-    return ""
+    return "Labeling monitors"
 
 
 def identify_zones() -> str:
     if _display is not None:
         _display.identify_zones()
-    return ""
+    return "Showing zones"

@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('eve', {
   openIntegrations:    () => ipcRenderer.send('open-integrations'),
   closeIntegrations:   () => ipcRenderer.send('close-integrations'),
   openExternal:        (url) => ipcRenderer.send('open-external', url),
+  closeSelf:           () => ipcRenderer.send('close-self'),
+  maximizeSelf:        () => ipcRenderer.send('maximize-self'),
   ceGetCommands:       ()       => ipcRenderer.invoke('command-editor:get-commands'),
   ceSetCommands:       (data)   => ipcRenderer.invoke('command-editor:set-commands', data),
   ceGetApps:           ()       => ipcRenderer.invoke('command-editor:get-apps'),

@@ -1,0 +1,60 @@
+/* Shared frameless-panel header — mirrors the routing directory titlebar.
+   Linked AFTER each panel's own style.css so these rules win. */
+
+.titlebar {
+  height: 44px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px 0 18px;
+  -webkit-app-region: drag;          /* drag the window by its header */
+}
+
+.titlebar-left {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.titlebar-title {
+  font-size: 9px;
+  letter-spacing: 5px;
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.titlebar-sub {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.titlebar-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  -webkit-app-region: no-drag;       /* buttons stay clickable */
+}
+
+.expand-btn,
+.close-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--dim);
+  font-size: 12px;
+  width: 26px; height: 26px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.expand-btn:hover { background: var(--accent-d); border-color: rgba(74,158,255,0.25); color: var(--accent); }
+.close-btn:hover  { background: rgba(255,80,80,0.1); border-color: rgba(255,80,80,0.3); color: rgba(255,80,80,0.85); }

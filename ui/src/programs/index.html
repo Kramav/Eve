@@ -6,12 +6,19 @@
         content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws://127.0.0.1:7734">
   <title>Eve — Running Programs</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="../titlebar.css">
 </head>
 <body>
 
   <div class="titlebar">
-    <span class="titlebar-title">RUNNING PROGRAMS</span>
-    <span class="titlebar-sub" id="count-label">Detecting…</span>
+    <div class="titlebar-left">
+      <span class="titlebar-title">RUNNING PROGRAMS</span>
+      <span class="titlebar-sub" id="count-label">Detecting…</span>
+    </div>
+    <div class="titlebar-right">
+      <button class="expand-btn titlebar-max" title="Maximize">⤢</button>
+      <button class="close-btn titlebar-close" title="Close">✕</button>
+    </div>
   </div>
 
   <div class="content">
@@ -25,6 +32,7 @@
     <button class="reload-btn" id="reload-btn">Refresh</button>
   </footer>
 
+  <script src="../titlebar.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -155,25 +155,18 @@ function createDirWin() {
   dirWin = new BrowserWindow({
     width: 700, height: 520,
     frame: false, transparent: true,
-    alwaysOnTop: true, skipTaskbar: true, resizable: false, show: false,
+    skipTaskbar: true, resizable: false, show: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
-  dirWin.setAlwaysOnTop(true, 'screen-saver', 1)
-  dirWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  // ponytail: a normal, coverable window — NOT always-on-top and NOT
+  // visible-over-fullscreen (that's the orb's job). So tabbing away lets other
+  // windows cover it, and a panel opened from a tile stacks in front.
   dirWin.loadFile(path.join(__dirname, 'src', 'directory', 'index.html'))
   dirWin._ready = false
   dirWin.once('ready-to-show', () => { dirWin._ready = true })
   dirWin.on('close', e => {
     if (!app.isQuitting) { e.preventDefault(); hideDirectory() }
   })
-  // Same periodic re-assert as the orb. Windows clears topmost flags on hidden
-  // windows when a fullscreen app takes focus; this keeps the flag alive so
-  // show() pops above the game instead of behind it.
-  setInterval(() => {
-    if (dirWin && !dirWin.isDestroyed()) {
-      dirWin.setAlwaysOnTop(true, 'screen-saver', 1)
-    }
-  }, 2000)
 }
 
 function showDirectory() {
@@ -183,14 +176,8 @@ function showDirectory() {
   const { dirX, dirY } = computeCornerLayout()
   dirWin.setBounds({ x: dirX, y: dirY, width: DIR_W, height: DIR_H })
   const present = () => {
-    // Pre-assert topmost so the OS orders the window above the fullscreen app
-    // at the moment show() takes effect, not after.
-    dirWin.setAlwaysOnTop(true, 'screen-saver', 1)
     dirWin.show()
-    // Re-assert after — Windows sometimes processes the show() event before
-    // applying the new z-order; this catches that race.
-    dirWin.setAlwaysOnTop(true, 'screen-saver', 1)
-    dirWin.moveTop()
+    dirWin.moveTop()   // pop to front on open, but not a sticky top-most pin
     dirWin.focus()
   }
   if (dirWin._ready) present()
@@ -305,7 +292,7 @@ function openAppManager() {
   if (appManagerWin && !appManagerWin.isDestroyed()) { appManagerWin.focus(); return }
   appManagerWin = new BrowserWindow({
     width: 860, height: 620, minWidth: 640, minHeight: 460,
-    title: 'Eve — App Manager', backgroundColor: '#080e18', frame: true, resizable: true,
+    title: 'Eve — App Manager', backgroundColor: '#080e18', frame: false, resizable: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
   appManagerWin.setMenuBarVisibility(false)
@@ -322,7 +309,7 @@ function openWindowManager() {
   if (windowManagerWin && !windowManagerWin.isDestroyed()) { windowManagerWin.focus(); return }
   windowManagerWin = new BrowserWindow({
     width: 860, height: 680, minWidth: 640, minHeight: 520,
-    title: 'Eve — Window Manager', backgroundColor: '#080e18', frame: true, resizable: true,
+    title: 'Eve — Window Manager', backgroundColor: '#080e18', frame: false, resizable: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
   windowManagerWin.setMenuBarVisibility(false)
@@ -339,7 +326,7 @@ function openVoiceSettings() {
   if (voiceSettingsWin && !voiceSettingsWin.isDestroyed()) { voiceSettingsWin.focus(); return }
   voiceSettingsWin = new BrowserWindow({
     width: 500, height: 540, minWidth: 420, minHeight: 460,
-    title: 'Eve — Voice Settings', backgroundColor: '#080e18', frame: true, resizable: false,
+    title: 'Eve — Voice Settings', backgroundColor: '#080e18', frame: false, resizable: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
   })
   voiceSettingsWin.setMenuBarVisibility(false)
@@ -381,7 +368,7 @@ function openCommandEditor() {
     width: 920, height: 680, minWidth: 720, minHeight: 520,
     title: 'Eve — Command Editor',
     backgroundColor: '#080e18',
-    frame: true, resizable: true,
+    frame: false, resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -405,7 +392,7 @@ function openPrograms() {
     width: 640, height: 600, minWidth: 480, minHeight: 380,
     title: 'Eve — Running Programs',
     backgroundColor: '#080e18',
-    frame: true, resizable: true,
+    frame: false, resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -429,7 +416,7 @@ function openMemory() {
     width: 560, height: 520, minWidth: 460, minHeight: 360,
     title: 'Eve — Memory',
     backgroundColor: '#080e18',
-    frame: true, resizable: true,
+    frame: false, resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -453,7 +440,7 @@ function openReminders() {
     width: 600, height: 520, minWidth: 500, minHeight: 360,
     title: 'Eve — Reminders',
     backgroundColor: '#080e18',
-    frame: true, resizable: true,
+    frame: false, resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -474,6 +461,17 @@ ipcMain.on('open-external', (_, url) => {
   if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url)
 })
 
+// Generic window controls for the frameless panel headers (titlebar.js).
+ipcMain.on('close-self', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender)
+  if (w && !w.isDestroyed()) w.close()
+})
+ipcMain.on('maximize-self', (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender)
+  if (!w || w.isDestroyed()) return
+  w.isMaximized() ? w.unmaximize() : w.maximize()
+})
+
 // ── API Keys / Integrations panel ──────────────────────────────────────────────
 
 function openIntegrations() {
@@ -482,7 +480,7 @@ function openIntegrations() {
     width: 520, height: 380, minWidth: 460, minHeight: 320,
     title: 'Eve — API Keys',
     backgroundColor: '#080e18',
-    frame: true, resizable: true,
+    frame: false, resizable: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -870,11 +868,7 @@ ipcMain.on('snap-panel', (_, { panel, bounds }) => {
     if (!win || win.isDestroyed()) return
     win.setBounds(bounds, true)
     win.show()
-    if (panel === 'directory') {
-      // dirWin is transparent/topmost — re-assert after move so it stays on top
-      win.setAlwaysOnTop(true, 'screen-saver', 1)
-      win.moveTop()
-    }
+    if (panel === 'directory') win.moveTop()
   }
   // Wait one tick so any just-created BrowserWindow finishes its initial setBounds
   setTimeout(place, 50)

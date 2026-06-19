@@ -154,6 +154,11 @@ INTENTS = [
 
     (r"(?:move|set|pin|put|send)\s+(?:the\s+)?(?:hud|orb|overlay)\s+(?:to|on|onto)\s+(.+)",                     wm.move_hud),
 
+    # Routing directory / overlay / HUD — show & hide the on-screen command list.
+    # After move_hud so "move the hud to ..." isn't swallowed by the bare "hud".
+    (r"(?:open|show|display|bring up)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud)", system.show_directory),
+    (r"(?:close|hide|dismiss|quit|exit)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud)", system.hide_directory),
+
     # API Keys / Integrations
     (r"(?:open|show|edit) (?:the )?(?:api keys?|integrations?|settings)",  system.open_integrations),
     (r"(?:close|quit|exit|dismiss) (?:the )?(?:api keys?|integrations?)",   system.close_integrations),
