@@ -186,11 +186,19 @@ def web_search_list(query: str):
     scrapers); browser as a last resort.
     """
     from core.response import SiteList
-    results = _fetch_search_results(query)
+    results = _fetch_search_results(query)        # DuckDuckGo
+    has_brave = bool(brave_key())
+    if not results and has_brave:
+        results = _fetch_brave_safe(query)        # Brave only if a key is set
     if not results:
-        results = _fetch_brave_safe(query)
-    if not results:
-        return web_search(query)
+        # Nothing came back — open the browser so the user still gets results,
+        # and if no Brave key is configured, nudge them toward setting one up.
+        web_search(query)
+        if not has_brave:
+            return ("DuckDuckGo didn't return anything and no Brave Search key "
+                    "is set up. I opened the results in your browser. For in-app "
+                    "results, say 'open API keys' and add a free Brave Search key.")
+        return f"Couldn't fetch results for {query}, so I opened your browser."
 
     sess = _sess_mod.get()
     sess.site_list  = results
