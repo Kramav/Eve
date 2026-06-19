@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws://127.0.0.1:7734">
+  <title>Eve — API Keys</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <div class="titlebar">
+    <span class="titlebar-title">API KEYS</span>
+    <span class="titlebar-sub">Connect optional online services</span>
+  </div>
+
+  <div class="content">
+
+    <div class="card">
+      <div class="card-hdr">
+        <span class="card-title">Brave Search</span>
+        <span class="card-status" id="brave-status">Not set</span>
+      </div>
+      <p class="card-desc">
+        Used as a fallback when DuckDuckGo can't return results. Free tier:
+        2,000 searches/month. Get a key, paste it below, and press Save.
+      </p>
+      <div class="key-row">
+        <input type="password" id="brave-key" class="key-input"
+               placeholder="Paste your Brave API key" spellcheck="false" autocomplete="off">
+        <button class="icon-btn" id="brave-reveal" title="Show / hide">👁</button>
+      </div>
+      <div class="btn-row">
+        <a class="link-btn" id="brave-get" href="#">Get a free key ↗</a>
+        <span class="spacer"></span>
+        <button class="ghost-btn" id="brave-test">Test</button>
+        <button class="ghost-btn danger" id="brave-clear">Clear</button>
+        <button class="save-btn" id="brave-save">Save</button>
+      </div>
+    </div>
+
+  </div>
+
+  <footer class="footer">
+    <span class="status-msg" id="status-msg"></span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

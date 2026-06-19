@@ -45,6 +45,7 @@ class Display:
             'main_text':        '',
             'log_entries':      [],
             'list_items':       [],
+            'list_links':       [],
             'list_status':      '',
             'voice_params':     self._load_voice_settings(),
         }
@@ -243,6 +244,25 @@ class Display:
                 'type': 'reminders_all', 'items': _rem.get_panel_payload(),
             }))
 
+        # ── API Keys / Integrations panel ────────────────────────────────
+        elif action == 'integrations:get':
+            await self._push_one(ws, json.dumps(self._integrations_state()))
+        elif action == 'integrations:set_brave':
+            self._save_api_key('brave', data.get('key', ''))
+            await self._push_all(json.dumps(self._integrations_state()))
+        elif action == 'integrations:test_brave':
+            from commands import search as _search
+            loop = asyncio.get_running_loop()
+            # `key` lets the user test before saving; falls back to stored key.
+            key = data.get('key') or None
+            res = await loop.run_in_executor(None, lambda: _search.test_brave_key(key))
+            await self._push_one(ws, json.dumps({
+                'type':    'integrations_test_result',
+                'service': 'brave',
+                'ok':      bool(res.get('ok')),
+                'message': res.get('message', ''),
+            }))
+
     def _broadcast(self):
         payload = self._snapshot()
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
@@ -349,6 +369,41 @@ class Display:
             SETTINGS_FILE.write_text(json.dumps(data, indent=2))
         except Exception as e:
             print(f"Error saving voice settings: {e}")
+
+    # ── API Keys / Integrations ─────────────────────────────────────────────
+
+    def _load_settings_raw(self) -> dict:
+        try:
+            return json.loads(SETTINGS_FILE.read_text())
+        except Exception:
+            return {}
+
+    def _save_api_key(self, service: str, key: str):
+        """Persist an API key under settings.json -> api_keys.<service>."""
+        try:
+            data = self._load_settings_raw()
+            keys = data.get('api_keys') or {}
+            keys[service] = (key or '').strip()
+            data['api_keys'] = keys
+            SETTINGS_FILE.write_text(json.dumps(data, indent=2))
+        except Exception as e:
+            print(f"Error saving API key: {e}")
+
+    def _integrations_state(self) -> dict:
+        """Masked snapshot for the UI — never sends the full key back."""
+        keys = self._load_settings_raw().get('api_keys') or {}
+        out = {}
+        for service, val in keys.items():
+            val = (val or '').strip()
+            out[service] = {
+                'set':  bool(val),
+                'hint': ('…' + val[-4:]) if len(val) >= 4 else ('set' if val else ''),
+            }
+        # Note whether the env var supplies a key even with nothing saved here.
+        if 'brave' not in out:
+            from commands.search import brave_key
+            out['brave'] = {'set': bool(brave_key()), 'hint': ''}
+        return {'type': 'integrations_state', 'services': out}
 
     def _load_apps(self) -> list:
         try:
@@ -469,6 +524,15 @@ class Display:
         payload = json.dumps({'type': 'close_reminders'})
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
 
+    def open_integrations(self):
+        """Open the API Keys / Integrations panel."""
+        payload = json.dumps({'type': 'open_integrations'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    def close_integrations(self):
+        payload = json.dumps({'type': 'close_integrations'})
+        asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
     def reminders_changed(self):
         """Broadcast the current reminder list so an open panel refreshes.
         Called from the background checker when a reminder fires/re-arms."""
@@ -564,15 +628,20 @@ class Display:
         )
         self._broadcast()
 
-    def show_list(self, items: list, status: str = 'Which video?'):
+    def show_list(self, items: list, status: str = 'Which video?', links: list = None):
+        """Show a pick-list in the overlay. *links* is an optional parallel
+        list of URLs (one per item); when present the renderer makes each row
+        clickable to open it in the default browser."""
         with self._lock:
             self._state['list_items']  = list(items)
+            self._state['list_links']  = list(links) if links else []
             self._state['list_status'] = status
         self._broadcast()
 
     def hide_list(self):
         with self._lock:
             self._state['list_items'] = []
+            self._state['list_links'] = []
         self._broadcast()
 
     def show_thumbnail(self, video_url: str, title: str):

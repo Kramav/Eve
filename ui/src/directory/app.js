@@ -5,6 +5,7 @@ const MODULES = [
   { id: 'programs',       label: 'Running Programs',  icon: '◉', action: () => window.eve.openPrograms()       },
   { id: 'memory',         label: 'Memory',            icon: '✦', action: () => window.eve.openMemory()         },
   { id: 'reminders',      label: 'Reminders',         icon: '⏰', action: () => window.eve.openReminders()      },
+  { id: 'integrations',   label: 'API Keys',          icon: '🔑', action: () => window.eve.openIntegrations()   },
   { id: 'commands',       label: 'Command Editor',    icon: '⌨', action: () => send('open_command_editor')    },
   { id: 'voice-settings', label: 'Voice Settings',    icon: '◈', action: () => window.eve.openVoiceSettings() },
 ]
@@ -97,18 +98,26 @@ function applyState(s) {
 
   for (const e of (s.log_entries || [])) appendEntry(e)
 
-  const listKey = JSON.stringify(s.list_items)
+  const listKey = JSON.stringify([s.list_items, s.list_links])
   if (listKey !== prev.listKey) {
     const rl = document.getElementById('result-list')
     if (s.list_items && s.list_items.length) {
       document.getElementById('result-hdr').textContent = s.list_status || 'Results'
       const items = document.getElementById('result-items')
+      const links = s.list_links || []
       items.innerHTML = ''
       s.list_items.forEach((item, i) => {
         const d   = document.createElement('div');  d.className   = 'result-item'
         const num = document.createElement('span'); num.className = 'result-num'; num.textContent = i + 1
         const txt = document.createElement('span'); txt.textContent = item
-        d.append(num, txt); items.appendChild(d)
+        d.append(num, txt)
+        const url = links[i]
+        if (url) {
+          d.classList.add('clickable')
+          d.title = url
+          d.addEventListener('click', () => window.eve.openExternal(url))
+        }
+        items.appendChild(d)
       })
       rl.style.display = ''
     } else {

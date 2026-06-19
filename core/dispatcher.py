@@ -154,6 +154,10 @@ INTENTS = [
 
     (r"(?:move|set|pin|put|send)\s+(?:the\s+)?(?:hud|orb|overlay)\s+(?:to|on|onto)\s+(.+)",                     wm.move_hud),
 
+    # API Keys / Integrations
+    (r"(?:open|show|edit) (?:the )?(?:api keys?|integrations?|settings)",  system.open_integrations),
+    (r"(?:close|quit|exit|dismiss) (?:the )?(?:api keys?|integrations?)",   system.close_integrations),
+
     # App Manager
     (r"(?:open|show|launch) (?:the )?app manager",             system.open_app_manager),
     (r"(?:close|quit|exit|dismiss) (?:the )?app manager",      system.close_app_manager),

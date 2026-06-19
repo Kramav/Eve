@@ -184,7 +184,11 @@ def main():
                 return
 
             if isinstance(response, (VideoList, SiteList)):
-                display.show_list(response.format_items(), status=str(response))
+                # Site results carry URLs so the overlay rows can be clicked
+                # open in the browser; video rows stay voice-select only.
+                links = ([item.get('url') for item in response.items]
+                         if isinstance(response, SiteList) else None)
+                display.show_list(response.format_items(), status=str(response), links=links)
                 display.log("action", str(response))
                 display.set_mode("playing")
                 keep_visible = True

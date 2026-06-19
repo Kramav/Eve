@@ -291,6 +291,9 @@ body.offline .state-label { color: var(--red); }
   font-size: 11px;
 }
 .result-item:last-child { border-bottom: none; }
+.result-item.clickable { cursor: pointer; transition: background 0.12s; }
+.result-item.clickable:hover { background: var(--accent-d, rgba(74,158,255,0.12)); }
+.result-item.clickable:hover span:last-child { text-decoration: underline; }
 
 .result-num {
   font-size: 9px;

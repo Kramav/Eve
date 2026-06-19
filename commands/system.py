@@ -127,6 +127,18 @@ def open_window_manager() -> str:
     return "Opening window manager"
 
 
+def open_integrations() -> str:
+    if _display is not None:
+        _display.open_integrations()
+    return "Opening API keys"
+
+
+def close_integrations() -> str:
+    if _display is not None:
+        _display.close_integrations()
+    return "Closing API keys"
+
+
 def close_app_manager() -> str:
     if _display is not None:
         _display.close_app_manager()

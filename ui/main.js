@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, screen, Tray, Menu, nativeImage, shell } = require('electron')
 const fs   = require('fs')
 const path = require('path')
 
@@ -17,6 +17,7 @@ let commandEditorWin  = null
 let programsWin       = null
 let memoryWin         = null
 let remindersWin      = null
+let integrationsWin   = null
 let tray             = null
 let _savedDirBounds  = null
 
@@ -466,6 +467,35 @@ function openReminders() {
 ipcMain.on('open-reminders',  openReminders)
 ipcMain.on('close-reminders', () => {
   if (remindersWin && !remindersWin.isDestroyed()) remindersWin.close()
+})
+
+// Open a search result (or any URL) in the user's default browser.
+ipcMain.on('open-external', (_, url) => {
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url)
+})
+
+// ── API Keys / Integrations panel ──────────────────────────────────────────────
+
+function openIntegrations() {
+  if (integrationsWin && !integrationsWin.isDestroyed()) { integrationsWin.focus(); return }
+  integrationsWin = new BrowserWindow({
+    width: 520, height: 380, minWidth: 460, minHeight: 320,
+    title: 'Eve — API Keys',
+    backgroundColor: '#080e18',
+    frame: true, resizable: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+    },
+  })
+  integrationsWin.setMenuBarVisibility(false)
+  integrationsWin.loadFile(path.join(__dirname, 'src', 'integrations', 'index.html'))
+  integrationsWin.on('closed', () => { integrationsWin = null })
+}
+
+ipcMain.on('open-integrations',  openIntegrations)
+ipcMain.on('close-integrations', () => {
+  if (integrationsWin && !integrationsWin.isDestroyed()) integrationsWin.close()
 })
 
 // Read/write helpers for the three editor files
