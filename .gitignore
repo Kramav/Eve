@@ -16,9 +16,14 @@ env/
 
 # Eve runtime data
 .eve/
+.eve_firefox_profile/
 custom_commands.json
 aliases.json
 apps.json
+discord_keys.json
+
+# Node deps (ui/) — regenerate with `npm install`
+node_modules/
 
 # Wake word model cache (downloaded on first run)
 *.onnx

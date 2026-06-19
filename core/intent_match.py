@@ -43,8 +43,7 @@ def build_catalog() -> list[tuple[str, Callable, tuple]]:
     files that the user can edit, so we want to pick up changes immediately."""
     from commands import apps, system, reminders, youtube, tiling, search, window_manager as wm
     from commands import windows as windows_cmd
-    import json
-    from pathlib import Path
+    from core.dispatcher import _HELP_TEXT
 
     cat: list[tuple[str, Callable, tuple]] = []
 
@@ -146,28 +145,12 @@ def build_catalog() -> list[tuple[str, Callable, tuple]]:
     return cat
 
 
-_HELP_TEXT = (
-    "I can search and play YouTube, open and close apps, search the web, "
-    "go to websites, set reminders and timers, control volume and media, "
-    "take screenshots, and control your PC."
-)
-
-
 def _alias_entries() -> list[tuple[str, Callable, tuple]]:
     """Pull custom alias phrases from aliases.json. Returns empty list on
     error so missing/bad files don't break dispatch."""
-    import json
-    from pathlib import Path
     from core import dispatcher as _disp
-    path = Path(__file__).parent.parent / 'aliases.json'
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text())
-    except Exception:
-        return []
     out = []
-    for phrase, key in data:
+    for phrase, key in _disp._load_aliases():
         handler = _disp.BUILTIN_MAP.get(key)
         if handler:
             out.append((phrase.lower(), handler, ()))
