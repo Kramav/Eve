@@ -33,6 +33,20 @@ A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manif
 
 ## P1 — High Priority
 
+### Focus / Game Awareness
+- **"Focus & front essential" programs** — let the user designate a program (typically a
+  game) as *essential to current use*: Eve must never steal focus from it, and its window
+  should stay in front of / be protected from Eve's overlays. The set is **dynamic** —
+  changeable by voice ("treat X as essential" / "this is my game" / "stop protecting X") and
+  ideally auto-detected (a borderless/fullscreen foreground app becomes the current essential
+  while it's focused). Builds directly on the existing no-focus machinery: every Eve action
+  already routes through `core/window_ops.raise_to_top_no_focus` (lowers the foreground
+  without `SetForegroundWindow`) and `showInactive()` overlays — this feature makes the
+  "protected" target explicit and persistent instead of "whatever happens to be foreground."
+  Store the essential list in `settings.json`; gate focus-affecting paths (Discord nav focus
+  swap in `commands/discord.py`, app launches, panel opens) on it so they defer to or skip
+  stealing focus when an essential program is active.
+
 ### Tiling / Window Management
 - **Workspace presets** — save all current window positions as a named preset, restore by voice.
   "save layout as work", "restore work layout". Store in `tiling_layouts.json` under a `workspaces` key.
