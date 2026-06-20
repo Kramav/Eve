@@ -6,28 +6,36 @@ from pathlib import Path
 _FILE = Path(__file__).parent.parent / 'features.json'
 
 DEFAULTS = {
-    'tts':        True,
-    'youtube':    True,
-    'web_search': True,
-    'reminders':  True,
-    'apps':       True,
-    'tiling':     True,
+    'tts':          True,
+    'youtube':      True,    # YouTube HUD feed browser (default experience)
+    'web_search':   True,
+    'reminders':    True,
+    'apps':         True,
+    'tiling':       True,
+    # ── Alpha (experimental) — default off, each has a fallback when off ──
+    'inapp_search': False,   # off → search falls back to opening Firefox
+    'mpv_youtube':  False,   # off → YouTube uses the HUD feed instead of mpv
 }
+
+# Experimental features, grouped separately in the UI.
+ALPHA = {'inapp_search', 'mpv_youtube'}
 
 # Human-readable labels sent to the UI
 LABELS = {
-    'tts':        'Text-to-Speech',
-    'youtube':    'YouTube',
-    'web_search': 'Web Search',
-    'reminders':  'Reminders & Timers',
-    'apps':       'App Launcher',
-    'tiling':     'Window Tiling',
+    'tts':          'Text-to-Speech',
+    'youtube':      'YouTube',
+    'web_search':   'Web Search',
+    'reminders':    'Reminders & Timers',
+    'apps':         'App Launcher',
+    'tiling':       'Window Tiling',
+    'inapp_search': 'In-app Search Results (DDG)',
+    'mpv_youtube':  'YouTube via mpv',
 }
 
 # Why a feature is unavailable — shown as a tooltip in the UI
 _UNAVAILABLE_REASONS = {
-    'youtube': 'mpv not found on PATH — install with: winget install mpv',
-    'tts':     'Voice model missing — run setup.py to download it',
+    'mpv_youtube': 'mpv not found on PATH — install with: winget install mpv',
+    'tts':         'Voice model missing — run setup.py to download it',
 }
 
 _lock   = threading.Lock()
@@ -63,13 +71,19 @@ def all_features() -> dict:
     return dict(_state)
 
 
+def alpha_keys() -> list:
+    """Keys that belong to the experimental 'Alpha' group (for UI grouping)."""
+    return [k for k in DEFAULTS if k in ALPHA]
+
+
 # ── runtime availability checks ──────────────────────────────────────────────
 
 def _compute_status() -> dict:
     status = {}
 
-    # YouTube: requires mpv on PATH
-    status['youtube'] = 'ok' if shutil.which('mpv') else 'unavailable'
+    # mpv-based YouTube (alpha) requires mpv on PATH. The default YouTube HUD
+    # browser does not, so 'youtube' stays available regardless.
+    status['mpv_youtube'] = 'ok' if shutil.which('mpv') else 'unavailable'
 
     # TTS: requires the .onnx voice model file
     try:

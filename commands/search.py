@@ -1,3 +1,4 @@
+import concurrent.futures
 import html as _html
 import json
 import re
@@ -16,6 +17,24 @@ _UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
        '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
 _SETTINGS_FILE = Path(__file__).parent.parent / 'settings.json'
+
+
+def _with_deadline(fn, *args, seconds: float = 6.0, default=None):
+    """Run *fn* in a worker thread and abandon it if it exceeds *seconds*.
+
+    Guarantees the caller never blocks longer than *seconds* even if the network
+    call stalls in a way urllib's socket timeout doesn't cover (e.g. a hung DNS
+    lookup). The abandoned thread keeps running but is daemon-bounded by the
+    request's own timeout, so it reaps itself shortly after.
+    ponytail: Python can't kill the thread; the per-request timeout caps the leak.
+    """
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    fut = pool.submit(fn, *args)
+    pool.shutdown(wait=False)
+    try:
+        return fut.result(timeout=seconds)
+    except concurrent.futures.TimeoutError:
+        return default
 
 
 def brave_key() -> str:
@@ -91,7 +110,7 @@ def _fetch_search_results(query: str, n: int = 5) -> list:
     for name, url, data in attempts:
         try:
             req = urllib.request.Request(url, data=data, headers={'User-Agent': _UA})
-            with urllib.request.urlopen(req, timeout=8) as resp:
+            with urllib.request.urlopen(req, timeout=5) as resp:
                 page = resp.read().decode('utf-8', errors='ignore')
             results = _parse_results(page, n)
             if results:
@@ -170,6 +189,35 @@ def test_brave_key(key: str = None) -> dict:
         return {'ok': False, 'message': f'Could not reach Brave: {e}'}
 
 
+# ── Firefox fallback (when in-app DDG results are turned off) ───────────────
+
+def _firefox_search(query: str) -> str:
+    """Open the search in Firefox and raise it over the foreground game without
+    stealing focus. Reuses the no-activate launch + no-focus raise primitives."""
+    import ctypes
+    import threading
+    import time
+    from commands.apps import _resolve_exe
+    from core.window_ops import raise_to_top_no_focus
+    from commands.tiling import find_window_by_spoken_name
+
+    url = 'https://duckduckgo.com/?q=' + urllib.parse.quote_plus(query)
+    firefox = _resolve_exe('firefox.exe')
+    # SW_SHOWNOACTIVATE = 4: ask the OS to open without taking foreground. The
+    # foreground lock usually keeps the game focused; the raise below guarantees
+    # the tab is visible over it.
+    # ponytail: launch-focus is OS-dependent; the no-focus raise is the guarantee.
+    ctypes.windll.shell32.ShellExecuteW(None, "open", firefox, url, None, 4)
+
+    def _raise():
+        time.sleep(1.2)  # let Firefox create/raise the window
+        match = find_window_by_spoken_name('firefox')
+        if match:
+            raise_to_top_no_focus(match['hwnd'])
+    threading.Thread(target=_raise, daemon=True).start()
+    return f"Searching Firefox for {query}"
+
+
 # ── Intent handlers ────────────────────────────────────────────────────────
 
 def web_search(query: str) -> str:
@@ -186,7 +234,13 @@ def web_search_list(query: str):
     scrapers); browser as a last resort.
     """
     from core.response import SiteList
-    results = _fetch_search_results(query)        # DuckDuckGo
+    from core import features
+    # In-app DDG results are an alpha feature; when off, fall back to Firefox.
+    if not features.get('inapp_search'):
+        return _firefox_search(query)
+    # Hard 6s cap: a throttled/stalled DDG can never hang the assistant on
+    # "Thinking" — bail to the browser fallback instead.
+    results = _with_deadline(_fetch_search_results, query, seconds=6.0) or []
     has_brave = bool(brave_key())
     if not results and has_brave:
         results = _fetch_brave_safe(query)        # Brave only if a key is set

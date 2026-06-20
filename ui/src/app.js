@@ -33,6 +33,13 @@ function connect() {
       else if (msg.type === 'wm_apply_preset')      window.eve.wmApplyPreset(msg.monitorRef, msg.presetKey)
       else if (msg.type === 'wm_move_hud')          window.eve.wmMoveHud(msg.monitorRef)
       else if (msg.type === 'wm_set_orb_corner')    window.eve.wmSetOrbCorner(msg.corner)
+      else if (msg.type === 'youtube_browse')       window.eve.openYoutube()
+      else if (msg.type === 'youtube_scroll')       window.eve.youtubeScroll(msg.dir)
+      else if (msg.type === 'youtube_number')       window.eve.youtubeNumber()
+      else if (msg.type === 'youtube_open')         window.eve.youtubeOpen(msg.n)
+      else if (msg.type === 'youtube_search')       window.eve.youtubeSearch(msg.query)
+      else if (msg.type === 'youtube_playpause')    window.eve.youtubePlayPause()
+      else if (msg.type === 'youtube_close')        window.eve.closeYoutube()
     } catch (_) {}
   }
   ws.onclose = () => setTimeout(connect, 500)

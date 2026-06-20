@@ -174,10 +174,14 @@ INTENTS = [
     # YouTube — before apps and web search to prevent misrouting
     # "open youtube" / "show youtube" must not fall through to open_app
     # "search youtube" must not fall through to web_search
+
+    # Feed browsing in the HUD browser — MUST precede the browser-home intent so
+    # "browse youtube" / "open the youtube feed" enters BROWSING mode.
+    (r"(?:browse|open|show)\s+(?:the\s+)?youtube\s+feed|^browse\s+youtube$", youtube.browse_feed_intent),
     (r"(?:open|launch|browse|show(?: me)?) (?:youtube|yt)(?:\s+home(?:page)?)?|^youtube$", youtube.browse_home_intent),
-    (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",             youtube.play_query_intent),
+    (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",             youtube.play_or_search),
     # \b prevents matching "play" inside "display", "watch" inside "watchful", etc.
-    (r"\b(?:play|watch)\s+(.+)",                                  youtube.play_query_intent),
+    (r"\b(?:play|watch)\s+(.+)",                                  youtube.play_or_search),
 
     # Tiling — before generic apps patterns so "snap/move X to Y" doesn't route to open_app.
     # Explicit-monitor variants come FIRST so the monitor qualifier isn't swallowed by the
@@ -474,6 +478,45 @@ def _dispatch_playing(text: str):
     return None  # fall through to normal dispatch
 
 
+def _dispatch_browsing(text: str):
+    """Handle commands while the YouTube HUD browser is open (Mode.BROWSING)."""
+    # In-page search: "search youtube for X" / "search for X" / "find X"
+    m = re.search(r"(?:search(?:\s+(?:youtube|yt))?(?:\s+for)?|find|look\s+up)\s+(.+)", text)
+    if m:
+        return youtube.feed_search(m.group(1).strip())
+
+    # Scrolling
+    if re.search(r"scroll\s+(?:to\s+(?:the\s+)?top|up\s+top|all\s+the\s+way\s+up)|back\s+to\s+top", text):
+        return youtube.feed_scroll("top")
+    if re.search(r"scroll\s+up|go\s+up|page\s+up", text):
+        return youtube.feed_scroll("up")
+    if re.search(r"scroll(?:\s+down)?|go\s+down|page\s+down|more", text):
+        return youtube.feed_scroll("down")
+
+    # Number the visible tiles
+    if re.search(r"(?:show|label)\s+(?:the\s+)?numbers?|number\s+(?:them|videos|the\s+videos)", text):
+        return youtube.feed_number()
+
+    # Open by number / ordinal: "open video 3", "play number 2", "the second one"
+    m = re.search(r"(?:open|play|watch|select|pick)\s+(?:video\s+|number\s+)?(\d+)", text)
+    if m:
+        return youtube.feed_open(int(m.group(1)))
+    m = re.search(r"^(?:number\s+)?(\d+)$", text)
+    if m:
+        return youtube.feed_open(int(m.group(1)))
+    for word, n in _ORDINALS.items():
+        if re.search(rf"\b{word}\b", text):
+            return youtube.feed_open(n)
+
+    # Playback + exit
+    if re.search(r"\b(?:pause|resume|play|stop)\b", text):
+        return youtube.feed_playpause()
+    if re.search(r"close\s+youtube|stop\s+youtube|exit\s+youtube|close\s+the\s+feed", text):
+        return youtube.feed_close()
+
+    return None  # fall through to normal dispatch
+
+
 # Words/phrases Whisper commonly substitutes for trigger words.
 # Patterns are matched as whole words (\b) on lowercased text. Order matters:
 # multi-word phrases before single-word ones so they win.
@@ -694,12 +737,17 @@ def dispatch(text: str):
 
     # --- State-aware routing ---
     sess = _sess_mod.get()
-    if sess.mode == Mode.LISTING and _features.get('youtube'):
+    # LISTING covers both mpv video lists and in-app web-search site lists.
+    if sess.mode == Mode.LISTING and (_features.get('mpv_youtube') or _features.get('inapp_search')):
         result = _dispatch_listing(text)
         if result is not None:
             return result
-    elif sess.mode == Mode.PLAYING and _features.get('youtube'):
+    elif sess.mode == Mode.PLAYING and _features.get('mpv_youtube'):
         result = _dispatch_playing(text)
+        if result is not None:
+            return result
+    elif sess.mode == Mode.BROWSING and _features.get('youtube'):
+        result = _dispatch_browsing(text)
         if result is not None:
             return result
 

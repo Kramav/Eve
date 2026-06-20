@@ -5,9 +5,10 @@ from enum import Enum, auto
 
 
 class Mode(Enum):
-    IDLE    = auto()
-    LISTING = auto()
-    PLAYING = auto()
+    IDLE     = auto()
+    LISTING  = auto()
+    PLAYING  = auto()
+    BROWSING = auto()   # YouTube HUD browser is open and taking feed commands
 
 
 @dataclass

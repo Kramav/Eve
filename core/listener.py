@@ -1,9 +1,10 @@
 import queue
 import threading
+import time
 import sounddevice as sd
 import numpy as np
 from openwakeword.model import Model
-from config import WAKE_WORD, SILENCE_THRESHOLD, SILENCE_DURATION_S
+from config import WAKE_WORD, SILENCE_THRESHOLD, SILENCE_DURATION_S, WAKE_COOLDOWN_S
 
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280  # 80ms — required by openwakeword
@@ -18,6 +19,7 @@ class Listener:
         self._q:           queue.Queue    = queue.Queue()
         self._is_speaking: threading.Event | None = None
         self.enabled                              = True
+        self._cooldown_until                      = 0.0
 
     def _callback(self, indata, frames, time_info, status):
         self._q.put(indata.copy())
@@ -42,6 +44,9 @@ class Listener:
                     audio = self._record_command()
                     if on_command and len(audio) > 0:
                         on_command(audio)
+                    # Refractory window: after responding (incl. TTS), don't let
+                    # Eve's own voice / echo re-trigger the wake word.
+                    self._cooldown_until = time.monotonic() + WAKE_COOLDOWN_S
                 except Exception as e:
                     print(f"Listener error (continuing): {e}")
                     self._drain()
@@ -54,12 +59,24 @@ class Listener:
                 break
 
     def _wait_for_wake_word(self):
+        # Reset the wake model's audio/prediction buffers before the first
+        # detection of a new wait so any TTS/echo captured at the speech
+        # boundary can't accumulate into a false trigger.
+        reset_pending = True
         while True:
             chunk = self._q.get().flatten()
             if not self.enabled:
+                reset_pending = True
                 continue  # drain mic while disabled; re-enable resumes immediately
             if self._is_speaking and self._is_speaking.is_set():
+                reset_pending = True
                 continue  # drain mic while TTS is playing
+            if time.monotonic() < self._cooldown_until:
+                reset_pending = True
+                continue  # drain mic during the post-response refractory window
+            if reset_pending:
+                self._model.reset()
+                reset_pending = False
             if self._model.predict(chunk).get(WAKE_WORD, 0) > 0.5:
                 return
 

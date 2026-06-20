@@ -116,6 +116,68 @@ def browse_home_intent():
     return "Opening YouTube"
 
 
+# ── Feed browsing (Eve-owned YouTube HUD window) ──────────────────────────────
+# Drives the Electron youtubeWin via _display directives. Voice-only; the window
+# floats over (borderless) games without stealing focus. See ui/main.js.
+
+def browse_feed_intent():
+    """Open the YouTube feed in the HUD browser and enter BROWSING mode."""
+    if _display is None:
+        return "The overlay isn't running."
+    _display.youtube_browse()
+    _sess_mod.get().mode = Mode.BROWSING
+    return "Browsing YouTube"
+
+
+def feed_scroll(direction: str) -> str:
+    if _display is not None:
+        _display.youtube_scroll(direction)
+    return {"up": "Scrolling up", "top": "Back to top"}.get(direction, "Scrolling down")
+
+
+def feed_number() -> str:
+    if _display is not None:
+        _display.youtube_number()
+    return "Numbering videos"
+
+
+def feed_open(n: int) -> str:
+    if _display is not None:
+        _display.youtube_open(n)
+    return f"Opening video {n}"
+
+
+def feed_search(query: str) -> str:
+    query = re.sub(r"\s+on (?:youtube|yt)$", "", query.strip())
+    if _display is not None:
+        _display.youtube_search(query)
+        _display.youtube_number()
+    return f"Searching the feed for {query}"
+
+
+def feed_playpause() -> str:
+    if _display is not None:
+        _display.youtube_playpause()
+    return ""
+
+
+def feed_close() -> str:
+    if _display is not None:
+        _display.youtube_close()
+    _sess_mod.reset()
+    return "Closing YouTube"
+
+
+def play_or_search(query: str):
+    """Default YouTube verb. Searches the HUD feed by default; only uses the
+    yt-dlp + mpv search-and-play list when the 'mpv_youtube' alpha is on."""
+    from core import features
+    if features.get('mpv_youtube'):
+        return play_query_intent(query)
+    _sess_mod.get().mode = Mode.BROWSING
+    return feed_search(query)
+
+
 def play_query_intent(query: str):
     from core.response import VideoList
     query = re.sub(r"\s+on (?:youtube|yt)$", "", query.strip())

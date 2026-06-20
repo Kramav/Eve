@@ -126,7 +126,7 @@ function applyState(s) {
     prev.listKey = listKey
   }
 
-  if (s.features) renderFeatures(s.features, s.feature_labels || {}, s.feature_status || {}, s.feature_reasons || {})
+  if (s.features) renderFeatures(s.features, s.feature_labels || {}, s.feature_status || {}, s.feature_reasons || {}, s.feature_alpha || [])
 
   prev = { mode: s.mode, status_text: s.status_text, main_text: s.main_text, listKey: prev.listKey, enabled: enabled }
 }
@@ -136,13 +136,23 @@ let _featureState   = {}
 let _featureStatus  = {}
 let _featureReasons = {}
 
-function renderFeatures(features, labels, status, reasons) {
-  status  = status  || {}
-  reasons = reasons || {}
-  const list = document.getElementById('feature-list')
-  const keys = Object.keys(features)
+function renderFeatures(features, labels, status, reasons, alpha) {
+  const alphaSet  = new Set(alpha || [])
+  const keys      = Object.keys(features)
+  const stable    = keys.filter(k => !alphaSet.has(k))
+  const alphaKeys = keys.filter(k =>  alphaSet.has(k))
 
-  // First render: build rows
+  _renderFeatureGroup(document.getElementById('feature-list'),       stable,    features, labels, status || {}, reasons || {})
+  _renderFeatureGroup(document.getElementById('alpha-feature-list'), alphaKeys, features, labels, status || {}, reasons || {})
+
+  const hdr = document.getElementById('alpha-hdr')
+  if (hdr) hdr.style.display = alphaKeys.length ? '' : 'none'
+}
+
+function _renderFeatureGroup(list, keys, features, labels, status, reasons) {
+  if (!list) return
+
+  // (Re)build rows when the set changes; clear caches so the update pass repaints.
   if (list.children.length !== keys.length) {
     list.innerHTML = ''
     for (const key of keys) {
@@ -162,10 +172,11 @@ function renderFeatures(features, labels, status, reasons) {
 
       row.append(lbl, tog)
       list.appendChild(row)
+      _featureState[key] = undefined
+      _featureStatus[key] = undefined
     }
   }
 
-  // Update each row
   for (const key of keys) {
     const avail   = (status[key] || 'ok') === 'ok'
     const enabled = features[key]

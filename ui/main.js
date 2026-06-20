@@ -18,6 +18,7 @@ let programsWin       = null
 let memoryWin         = null
 let remindersWin      = null
 let integrationsWin   = null
+let youtubeWin        = null
 let tray             = null
 let _savedDirBounds  = null
 
@@ -192,8 +193,14 @@ function hideDirectory() {
 }
 
 function toggleDirectory() {
-  if (dirWin && !dirWin.isDestroyed() && dirWin.isVisible()) hideDirectory()
-  else showDirectory()
+  if (!dirWin || dirWin.isDestroyed() || !dirWin.isVisible()) {
+    showDirectory()                 // closed → open
+  } else if (dirWin.isFocused()) {
+    hideDirectory()                 // open & front → close
+  } else {
+    // open but covered/backgrounded → raise it instead of closing (no reposition)
+    dirWin.show(); dirWin.moveTop(); dirWin.focus()
+  }
 }
 
 // ── IPC ───────────────────────────────────────────────────────────────────────
@@ -470,6 +477,103 @@ ipcMain.on('maximize-self', (e) => {
   const w = BrowserWindow.fromWebContents(e.sender)
   if (!w || w.isDestroyed()) return
   w.isMaximized() ? w.unmaximize() : w.maximize()
+})
+
+// ── YouTube HUD browser ─────────────────────────────────────────────────────
+// A real Chromium window showing youtube.com, floated over (borderless) games
+// with the orb's no-focus topmost recipe. Always presented with showInactive()
+// so voice navigation never steals focus from the game. Logged-in session
+// persists via the dedicated partition.
+
+const YT_W = 480, YT_H = 320, YT_MARGIN = 12
+
+function youtubeCornerPos() {
+  const { x, y, width, height } = getOrbDisplay().bounds
+  return { x: x + width - YT_W - YT_MARGIN, y: y + height - YT_H - YT_MARGIN }
+}
+
+function createYoutubeWin() {
+  const pos = youtubeCornerPos()
+  youtubeWin = new BrowserWindow({
+    width: YT_W, height: YT_H, x: pos.x, y: pos.y,
+    frame: false, skipTaskbar: true, resizable: true, show: false,
+    backgroundColor: '#0f0f0f',
+    webPreferences: { partition: 'persist:youtube', contextIsolation: true },
+  })
+  youtubeWin.setAlwaysOnTop(true, 'screen-saver', 1)
+  youtubeWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  youtubeWin.loadURL('https://www.youtube.com')
+  youtubeWin.on('closed', () => { youtubeWin = null })
+}
+
+// Show without activating, then re-assert topmost so it surfaces over the game.
+function ytSurface() {
+  if (!youtubeWin || youtubeWin.isDestroyed()) return
+  youtubeWin.showInactive()
+  youtubeWin.setAlwaysOnTop(true, 'screen-saver', 1)
+}
+
+// Run JS in the page, then re-surface. Swallows errors (page may be mid-load).
+function ytRun(js) {
+  if (!youtubeWin || youtubeWin.isDestroyed()) return
+  youtubeWin.webContents.executeJavaScript(js, true).catch(() => {})
+  ytSurface()
+}
+
+function openYoutube() {
+  if (!youtubeWin || youtubeWin.isDestroyed()) createYoutubeWin()
+  ytSurface()
+}
+
+ipcMain.on('open-youtube', openYoutube)
+
+ipcMain.on('youtube-scroll', (_, dir) => {
+  const js = dir === 'up'   ? 'window.scrollBy(0,-800)'
+           : dir === 'top'  ? 'window.scrollTo(0,0)'
+           :                  'window.scrollBy(0,800)'
+  ytRun(js)
+})
+
+// Badge the in-viewport video tiles 1..N and stash their click targets so
+// "open video N" can act on them.
+// ponytail: selectors track YouTube's current DOM; retarget here if layout shifts.
+ipcMain.on('youtube-number', () => ytRun(`(() => {
+  document.querySelectorAll('.eve-badge').forEach(b => b.remove());
+  const sel = 'ytd-rich-item-renderer, ytd-video-renderer';
+  const vh = window.innerHeight;
+  const tiles = [...document.querySelectorAll(sel)].filter(t => {
+    const r = t.getBoundingClientRect();
+    return r.top >= -40 && r.top < vh && r.height > 40;
+  }).slice(0, 9);
+  window.__eveTiles = tiles.map(t => t.querySelector('a#thumbnail, a#video-title-link, a#video-title') || t);
+  tiles.forEach((t, i) => {
+    const b = document.createElement('div');
+    b.className = 'eve-badge';
+    b.textContent = i + 1;
+    b.style.cssText = 'position:absolute;z-index:9999;top:6px;left:6px;background:#4a9eff;color:#000;font:bold 16px sans-serif;width:26px;height:26px;border-radius:4px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 6px rgba(0,0,0,.6)';
+    t.style.position = 'relative';
+    t.appendChild(b);
+  });
+})()`))
+
+ipcMain.on('youtube-open', (_, n) => {
+  const i = Math.max(1, parseInt(n, 10) || 1) - 1
+  ytRun(`(window.__eveTiles && window.__eveTiles[${i}]) && window.__eveTiles[${i}].click()`)
+})
+
+ipcMain.on('youtube-search', (_, query) => {
+  if (!youtubeWin || youtubeWin.isDestroyed()) createYoutubeWin()
+  const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query || '')
+  youtubeWin.loadURL(url)
+  ytSurface()
+})
+
+ipcMain.on('youtube-playpause', () => ytRun(
+  `(() => { const v = document.querySelector('video'); if (v) v.paused ? v.play() : v.pause(); })()`
+))
+
+ipcMain.on('close-youtube', () => {
+  if (youtubeWin && !youtubeWin.isDestroyed()) youtubeWin.close()
 })
 
 // ── API Keys / Integrations panel ──────────────────────────────────────────────

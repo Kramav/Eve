@@ -44,6 +44,15 @@ contextBridge.exposeInMainWorld('eve', {
   openExternal:        (url) => ipcRenderer.send('open-external', url),
   closeSelf:           () => ipcRenderer.send('close-self'),
   maximizeSelf:        () => ipcRenderer.send('maximize-self'),
+
+  // ── YouTube HUD browser ──────────────────────────────────────────────────
+  openYoutube:         () => ipcRenderer.send('open-youtube'),
+  youtubeScroll:       (dir)   => ipcRenderer.send('youtube-scroll', dir),
+  youtubeNumber:       ()      => ipcRenderer.send('youtube-number'),
+  youtubeOpen:         (n)     => ipcRenderer.send('youtube-open', n),
+  youtubeSearch:       (query) => ipcRenderer.send('youtube-search', query),
+  youtubePlayPause:    ()      => ipcRenderer.send('youtube-playpause'),
+  closeYoutube:        ()      => ipcRenderer.send('close-youtube'),
   ceGetCommands:       ()       => ipcRenderer.invoke('command-editor:get-commands'),
   ceSetCommands:       (data)   => ipcRenderer.invoke('command-editor:set-commands', data),
   ceGetApps:           ()       => ipcRenderer.invoke('command-editor:get-apps'),

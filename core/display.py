@@ -93,6 +93,7 @@ class Display:
             s['features']              = _features.all_features()
             s['feature_status']        = _features.all_status()
             s['feature_labels']        = _features.LABELS
+            s['feature_alpha']         = _features.alpha_keys()
             s['feature_reasons']       = {
                 k: _features.unavailable_reason(k)
                 for k, v in _features.all_status().items()
@@ -556,6 +557,35 @@ class Display:
     def close_command_editor(self):
         payload = json.dumps({'type': 'close_command_editor'})
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
+
+    # ── YouTube HUD browser ─────────────────────────────────────────────────
+
+    def youtube_browse(self):
+        self._emit({'type': 'youtube_browse'})
+
+    def youtube_scroll(self, direction: str):
+        self._emit({'type': 'youtube_scroll', 'dir': str(direction)})
+
+    def youtube_number(self):
+        self._emit({'type': 'youtube_number'})
+
+    def youtube_open(self, n: int):
+        self._emit({'type': 'youtube_open', 'n': int(n)})
+
+    def youtube_search(self, query: str):
+        self._emit({'type': 'youtube_search', 'query': str(query)})
+
+    def youtube_playpause(self):
+        self._emit({'type': 'youtube_playpause'})
+
+    def youtube_close(self):
+        self._emit({'type': 'youtube_close'})
+
+    def _emit(self, msg: dict):
+        """Fire-and-forget broadcast of a typed directive to all Electron clients."""
+        asyncio.run_coroutine_threadsafe(
+            self._push_all(json.dumps(msg)), self._loop
+        )
 
     # ── Public API: HUD state (same interface as before) ────────────────────
 

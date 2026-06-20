@@ -1,0 +1,10 @@
+{
+  "tts": true,
+  "youtube": true,
+  "web_search": true,
+  "reminders": true,
+  "apps": true,
+  "tiling": true,
+  "inapp_search": false,
+  "mpv_youtube": false
+}

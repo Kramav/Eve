@@ -4,7 +4,12 @@ from pathlib import Path
 WAKE_WORD = "hey_jarvis"   # pre-trained model name from openwakeword
 WHISPER_MODEL = "small.en"  # tiny.en (fastest) / base.en / small.en (most accurate)
 SILENCE_THRESHOLD = 800    # mic amplitude to consider silence (0–32768); raise if recording runs long
-SILENCE_DURATION_S = 1.5   # seconds of silence to stop recording
+SILENCE_DURATION_S = 2.5   # seconds of silence to stop recording (raise to tolerate longer mid-sentence pauses; lower for snappier end-of-speech)
+
+# After Eve answers, ignore the wake word for this long so its own TTS / room
+# echo can't falsely re-trigger "Hey Jarvis" and record your next words.
+# Lower it if re-waking feels sluggish; raise it if echo still bounces it back.
+WAKE_COOLDOWN_S = 1.0
 
 # Piper TTS — drop .onnx + .onnx.json pairs into models/voices/ (any number).
 # Download voices: https://huggingface.co/rhasspy/piper-voices

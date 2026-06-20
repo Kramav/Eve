@@ -177,6 +177,13 @@ body.offline .state-label { color: var(--red); }
   color: var(--dim);
   text-transform: uppercase;
 }
+.section-hdr-note {
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: var(--dim2);
+  text-transform: uppercase;
+  margin-left: 6px;
+}
 
 /* ── Feature toggles ─────────────────────────────────────────────────── */
 .feature-list {
