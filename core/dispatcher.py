@@ -159,6 +159,10 @@ INTENTS = [
     (r"(?:open|show|display|bring up)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud)", system.show_directory),
     (r"(?:close|hide|dismiss|quit|exit)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud)", system.hide_directory),
 
+    # Voice Settings — before the generic open/launch app intent so it isn't
+    # misrouted to open_app (matches main.py's pre-dispatch _VOICE_SETTINGS).
+    (r"(?:open|show|launch) (?:the )?voice (?:settings?|manager|config(?:uration)?)", system.open_voice_settings),
+
     # API Keys / Integrations
     (r"(?:open|show|edit) (?:the )?(?:api keys?|integrations?|settings)",  system.open_integrations),
     (r"(?:close|quit|exit|dismiss) (?:the )?(?:api keys?|integrations?)",   system.close_integrations),
@@ -266,7 +270,7 @@ INTENTS = [
 
     # Date / time
     (r"what(?:'?s| is) (?:the )?time|what time is it",          system.get_time),
-    (r"what(?:'?s| is) (?:(?:today(?:'?s?)? )?date|day is it)", system.get_date),
+    (r"what(?:'?s| is) (?:the |today(?:'?s?)? )?(?:date|day is it)", system.get_date),
 
     # Memory recall — "what is my X" / "what's my X" / "what do you remember"
     # Placed AFTER time/date so "what's the time" still wins (no `my` qualifier).
