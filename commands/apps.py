@@ -1,6 +1,7 @@
 import ctypes
 import json
 import os
+import shutil
 import subprocess
 import threading
 import winreg
@@ -8,6 +9,23 @@ from pathlib import Path
 from core.response import Silent
 
 _APPS_FILE = Path(__file__).parent.parent / "apps.json"
+
+
+def find_firefox() -> str | None:
+    """Full path to firefox.exe via PATH → App Paths registry → standard install
+    dirs, or None. Firefox often isn't on PATH on Windows, so check all three."""
+    p = shutil.which('firefox')
+    if p:
+        return p
+    resolved = _resolve_exe('firefox.exe')
+    if resolved.lower().endswith('firefox.exe') and os.path.isfile(resolved):
+        return resolved
+    for base in (os.environ.get('PROGRAMFILES', r'C:\Program Files'),
+                 os.environ.get('PROGRAMFILES(X86)', r'C:\Program Files (x86)')):
+        cand = Path(base) / 'Mozilla Firefox' / 'firefox.exe'
+        if cand.is_file():
+            return str(cand)
+    return None
 
 _APP_PATHS_KEYS = [
     (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Microsoft\Windows\App Paths'),

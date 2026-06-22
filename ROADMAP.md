@@ -8,25 +8,19 @@ Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2**
 
 > These must be resolved before Eve can be shared publicly or accept outside contributors.
 
-### 1. License
-Add a `LICENSE` file (MIT recommended). Without one, no one can legally use or contribute to the project.
-
-### 2. First-run experience
-New users currently must: install Python 3.14, install Node, run `npm install`, manually download an `.onnx` voice model from Hugging Face, run a separate wake word download command, and hand-edit `apps.json`. A setup script (`setup.ps1` or `setup.py`) should automate: voice model download, wake word model download, and `npm install` in `ui/`. Goal: `git clone` → run one command → `python main.py` works.
-
-### 3. Platform scope decision
+### 1. Platform scope decision
 Eve is deeply Windows-specific (pyautogui, win32 APIs, Electron shell calls, `.lnk` scanning). **Decide: lean in and own "best voice assistant for Windows," or scope out Win32 dependencies for cross-platform support.** Either is valid — but the choice drives architecture decisions downstream.
 
-### 4. Test suite
-The dispatcher has 30+ regex patterns and zero tests. Contributors will silently break intent routing. Minimum viable: a pytest file that covers each regex in `INTENTS` and key dispatch paths.
+### 2. Test suite — *started*
+Started: `tests/test_dispatch.py` covers INTENTS routing, BROWSING mode routing, feature-gating, and mishear substitutions (runs under `pytest` or standalone via `python tests/test_dispatch.py`; tests routing without executing handlers). Caught + fixed two real bugs (date regex gap, missing voice-settings intent). **Remaining:** extend to tiling snaps, reminders, and Discord (need light monkeypatching since those handlers have side effects).
 
-### 5. Plugin/skill system
+### 3. Plugin/skill system
 Adding a new command currently requires editing `core/dispatcher.py` directly. External contributors need a way to drop in a skill file without touching core. See P3 "Skill entry points" — promote to P0 for public release.
 
-### 6. Remove hardcoded assumptions
+### 4. Remove hardcoded assumptions
 Port `7734`, `hey_jarvis` as default wake word, and several file paths are hardcoded outside of `config.py`. All user-facing settings should be overridable from `config.py` or `settings.json`.
 
-### 7. Distribution
+### 5. Distribution
 A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manifest) is the difference between "developers only" and "anyone can install it." Inno Setup or NSIS can wrap the Electron build + Python env into a single installer.
 
 ---
@@ -118,6 +112,7 @@ A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manif
 
 | Feature | Notes |
 |---------|-------|
+| License | AGPL-3.0 `LICENSE` present at repo root (was P0 #1) |
 | Window Manager UI | Monitor cards, display picker, HUD pinning |
 | Tiling WM | Zone presets, voice snap, layout panel in WM UI |
 | HUD drift fix | `set-size` uses `getOverlayDisplay()` not dynamic window center |

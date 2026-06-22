@@ -197,12 +197,16 @@ def _firefox_search(query: str) -> str:
     import ctypes
     import threading
     import time
-    from commands.apps import _resolve_exe
+    from commands.apps import find_firefox
     from core.window_ops import raise_to_top_no_focus
     from commands.tiling import find_window_by_spoken_name
 
     url = 'https://duckduckgo.com/?q=' + urllib.parse.quote_plus(query)
-    firefox = _resolve_exe('firefox.exe')
+    firefox = find_firefox()
+    if not firefox:
+        # Firefox not installed/findable — still get results in the default browser.
+        webbrowser.open(url)
+        return f"Searching for {query}"
     # SW_SHOWNOACTIVATE = 4: ask the OS to open without taking foreground. The
     # foreground lock usually keeps the game focused; the raise below guarantees
     # the tab is visible over it.

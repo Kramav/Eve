@@ -7,6 +7,7 @@ Re-running is safe — all steps check before acting.
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+sys.path.insert(0, str(ROOT))   # let setup import the project's own modules
 
 
 # ── output helpers ────────────────────────────────────────────────────────────
@@ -130,8 +132,18 @@ def _download_with_progress(url: str, dest: Path):
         pct = min(count * block * 100 / total, 100)
         filled = int(pct / 5)
         print(f"\r       [{'#' * filled}{' ' * (20 - filled)}] {pct:3.0f}%", end='', flush=True)
-    urllib.request.urlretrieve(url, dest, reporthook=reporthook)
-    print()
+    # Download to a temp file and rename only on full success, so an interrupted
+    # download can't leave a corrupt file that later passes the exists() check.
+    tmp = dest.parent / (dest.name + '.part')
+    try:
+        urllib.request.urlretrieve(url, tmp, reporthook=reporthook)
+        print()
+        tmp.replace(dest)
+    except BaseException:
+        print()
+        if tmp.exists():
+            tmp.unlink()
+        raise
 
 
 def _print_voice_instructions(voice: str, voices_dir: Path):
@@ -152,6 +164,16 @@ def npm_install():
     if (ui_dir / 'node_modules' / 'electron').exists():
         ok("Electron already installed")
         return
+
+    node = shutil.which('node')
+    if node:
+        try:
+            v = subprocess.run([node, '--version'], capture_output=True, text=True).stdout.strip()
+            major = int(v.lstrip('v').split('.')[0])
+            if major < 18:
+                warn(f"Node {v} is old — Electron 42 needs Node 18+. Consider updating.")
+        except Exception:
+            pass
 
     info("Running npm install in ui/ ...")
     try:
@@ -177,6 +199,20 @@ def check_mpv():
         info("Then restart your terminal for PATH to update, and re-run setup.py to verify")
 
 
+def check_firefox():
+    step("Firefox (web-search fallback)")
+    try:
+        from commands.apps import find_firefox
+        found = find_firefox()
+    except Exception:
+        found = None
+    if found:
+        ok(f"Firefox found — {found}")
+    else:
+        warn("Firefox not found — the in-app-search-off fallback opens search in Firefox")
+        info("Install from https://www.mozilla.org/firefox/ (or keep in-app search ON in the overlay)")
+
+
 def create_defaults():
     step("Default config files")
 
@@ -189,18 +225,32 @@ def create_defaults():
 
     features_file = ROOT / 'features.json'
     if not features_file.exists():
-        defaults = {
-            'tts':        True,
-            'youtube':    True,
-            'web_search': True,
-            'reminders':  True,
-            'apps':       True,
-            'tiling':     True,
-        }
-        features_file.write_text(json.dumps(defaults, indent=2))
-        ok("Created features.json (all features enabled)")
+        # Import the single source of truth so this never drifts from the app.
+        from core.features import DEFAULTS
+        features_file.write_text(json.dumps(DEFAULTS, indent=2))
+        ok("Created features.json (defaults)")
     else:
         ok("features.json already exists")
+
+    dk = ROOT / 'discord_keys.json'
+    dk_example = ROOT / 'discord_keys.example.json'
+    if not dk.exists() and dk_example.exists():
+        shutil.copyfile(dk_example, dk)
+        ok("Created discord_keys.json from example")
+
+
+def smoke_test():
+    step("Smoke test")
+    import importlib
+    mods = ('core.dispatcher', 'core.display', 'core.listener',
+            'core.speaker', 'core.transcriber')
+    try:
+        for m in mods:
+            importlib.import_module(m)
+        ok("Core modules import cleanly")
+    except Exception as e:
+        die(f"Core import failed: {e}\n"
+            "         Setup is incomplete — resolve the above before running Eve.")
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
@@ -215,7 +265,9 @@ def main():
     download_voice_model()
     npm_install()
     check_mpv()
+    check_firefox()
     create_defaults()
+    smoke_test()
 
     print("\n" + "=" * 48)
     print("Done. Start Eve with:\n")
