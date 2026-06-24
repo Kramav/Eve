@@ -113,6 +113,7 @@ A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manif
 | Feature | Notes |
 |---------|-------|
 | License | AGPL-3.0 `LICENSE` present at repo root (was P0 #1) |
+| First-run setup + hardening | `setup.py` does the full one-command flow (Python check, pip, wake-word + Piper voice download, npm, mpv/Firefox checks, default config) and is idempotent. Hardened: `create_defaults` imports `core.features.DEFAULTS` (no drift); downloads go to `.part` temp + atomic rename; `check_firefox()` + shared `apps.find_firefox()` (PATH→registry→Program Files); search fallback degrades to default browser if Firefox absent; final core-import smoke test; seeds `discord_keys.json` from example; warns on Node < 18 |
 | Window Manager UI | Monitor cards, display picker, HUD pinning |
 | Tiling WM | Zone presets, voice snap, layout panel in WM UI |
 | HUD drift fix | `set-size` uses `getOverlayDisplay()` not dynamic window center |

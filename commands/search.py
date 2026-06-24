@@ -198,7 +198,7 @@ def _firefox_search(query: str) -> str:
     import threading
     import time
     from commands.apps import find_firefox
-    from core.window_ops import raise_to_top_no_focus
+    from core.window_ops import raise_to_top_no_focus, fullscreen_app_running
     from commands.tiling import find_window_by_spoken_name
 
     url = 'https://duckduckgo.com/?q=' + urllib.parse.quote_plus(query)
@@ -215,6 +215,8 @@ def _firefox_search(query: str) -> str:
 
     def _raise():
         time.sleep(1.2)  # let Firefox create/raise the window
+        if fullscreen_app_running():
+            return  # a game owns the screen — leave Firefox in the background
         match = find_window_by_spoken_name('firefox')
         if match:
             raise_to_top_no_focus(match['hwnd'])

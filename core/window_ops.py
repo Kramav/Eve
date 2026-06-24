@@ -23,6 +23,7 @@ from ctypes import wintypes
 
 _u32 = ctypes.windll.user32
 _k32 = ctypes.windll.kernel32
+_shell32 = ctypes.windll.shell32
 
 # z-order targets
 HWND_TOP        =  0
@@ -64,6 +65,11 @@ _u32.GetWindowThreadProcessId.restype  = wintypes.DWORD
 _u32.AttachThreadInput.argtypes  = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
 _u32.AttachThreadInput.restype   = wintypes.BOOL
 _k32.GetCurrentThreadId.restype  = wintypes.DWORD
+_u32.GetWindowRect.argtypes      = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+_u32.MonitorFromWindow.argtypes  = [wintypes.HWND, wintypes.DWORD]
+_u32.MonitorFromWindow.restype   = ctypes.c_void_p   # HMONITOR — must not truncate
+_shell32.SHQueryUserNotificationState.argtypes = [ctypes.POINTER(ctypes.c_int)]
+_shell32.SHQueryUserNotificationState.restype  = ctypes.c_long  # HRESULT
 
 # Pseudo-handle constants need to be passed as HWND, not Python ints, so the
 # argtype conversion treats them as the intended special values.
@@ -117,6 +123,45 @@ def raise_to_top_no_focus(hwnd: int) -> bool:
     return True
 
 
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [('cbSize', wintypes.DWORD), ('rcMonitor', wintypes.RECT),
+                ('rcWork', wintypes.RECT), ('dwFlags', wintypes.DWORD)]
+
+QUNS_RUNNING_D3D_FULL_SCREEN = 3
+QUNS_PRESENTATION_MODE       = 4
+
+
+def _covers(win: tuple, mon: tuple) -> bool:
+    """True if window rect (l,t,r,b) covers the whole monitor rect (l,t,r,b).
+    A maximised app stops at the work area, so this only fires for borderless
+    fullscreen — i.e. a windowed game."""
+    return (win[0] <= mon[0] and win[1] <= mon[1]
+            and win[2] >= mon[2] and win[3] >= mon[3])
+
+
+def fullscreen_app_running() -> bool:
+    """True if a game / fullscreen app owns the screen, so we should NOT raise
+    other windows over it. Two signals: the native exclusive-fullscreen D3D flag
+    Windows uses to mute notifications, plus a borderless-window geometry check."""
+    state = ctypes.c_int(0)
+    if _shell32.SHQueryUserNotificationState(ctypes.byref(state)) == 0:
+        if state.value in (QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE):
+            return True
+    fg = _u32.GetForegroundWindow()
+    if not fg:
+        return False
+    r = wintypes.RECT()
+    _u32.GetWindowRect(fg, ctypes.byref(r))
+    hmon = _u32.MonitorFromWindow(fg, 2)  # MONITOR_DEFAULTTONEAREST
+    info = _MONITORINFO()
+    info.cbSize = ctypes.sizeof(_MONITORINFO)
+    if not _u32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+        return False
+    m = info.rcMonitor
+    return _covers((r.left, r.top, r.right, r.bottom),
+                   (m.left, m.top, m.right, m.bottom))
+
+
 def send_to_bottom(hwnd: int) -> bool:
     """Push *hwnd* to the bottom of the z-order. Downward z-order moves are not
     restricted by the foreground lock, so no AttachThreadInput needed."""
@@ -124,3 +169,13 @@ def send_to_bottom(hwnd: int) -> bool:
         return False
     return bool(_u32.SetWindowPos(hwnd, wintypes.HWND(HWND_BOTTOM),
                                   0, 0, 0, 0, _SWP))
+
+
+if __name__ == '__main__':
+    mon = (0, 0, 1920, 1080)
+    assert _covers((0, 0, 1920, 1080), mon)        # exact borderless fullscreen
+    assert _covers((-8, -8, 1928, 1088), mon)      # game overhangs edges
+    assert not _covers((0, 0, 1920, 1040), mon)    # maximised: stops at work area
+    assert not _covers((100, 100, 800, 600), mon)  # plain window
+    print('live state, fullscreen_app_running() =', fullscreen_app_running())
+    print('ok')
