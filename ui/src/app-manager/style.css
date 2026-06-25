@@ -330,6 +330,47 @@ html, body {
 }
 .remove-btn:hover { color: var(--red); }
 
+/* ── Configured app card (grouped: one app, many names) ─────────────── */
+.config-app {
+  border-left: 2px solid rgba(0,232,122,0.3);
+  margin-bottom: 6px;
+  padding: 6px 12px 8px;
+}
+.config-app:hover { background: rgba(0,232,122,0.03); }
+
+.config-app-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.config-names {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-left: 8px;
+}
+
+.config-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.config-name-row .config-spoken { flex: 1; }
+
+.add-name-input {
+  color: var(--dim) !important;
+  border-style: dashed !important;
+}
+.add-name-input:focus { color: var(--accent) !important; }
+
+.add-name-btn {
+  flex-shrink: 0;
+  padding: 3px 8px;
+}
+
 /* ── Manual add ─────────────────────────────────────────────────────── */
 .manual-add {
   flex-shrink: 0;

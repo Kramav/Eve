@@ -22,6 +22,13 @@ from rapidfuzz import fuzz, process
 HIGH_THRESHOLD = 88   # near-certain: execute silently
 MED_THRESHOLD  = 68   # close enough to ask "did you mean X?"
 
+# token_set_ratio scores 100 when the catalog phrase is a *subset* of a longer
+# utterance ("make my app manager full screen" ⊃ "app manager"), which would
+# silently fire the wrong panel. token_sort_ratio is length/order sensitive, so
+# we additionally require it to clear this bar before a *silent* execution. A
+# match that passes token_set but fails this is demoted to a "did you mean?".
+STRICT_THRESHOLD = 72
+
 
 def _ws(scorer):
     """Wrap a scorer so it operates on whitespace-normalized strings."""
@@ -158,7 +165,9 @@ def _alias_entries() -> list[tuple[str, Callable, tuple]]:
 
 
 def best_match(text: str, catalog: list[tuple[str, Callable, tuple]]):
-    """Return (canonical, callable, args, score) for the best match, or None."""
+    """Return (canonical, callable, args, score, strict) for the best match, or
+    None. `strict` is the length/order-sensitive token_sort_ratio against the
+    chosen phrase — dispatch uses it to decide silent-exec vs "did you mean?"."""
     if not catalog or not text:
         return None
     phrases = [c[0] for c in catalog]
@@ -168,4 +177,5 @@ def best_match(text: str, catalog: list[tuple[str, Callable, tuple]]):
         return None
     _, score, idx = result
     canonical, fn, args = catalog[idx]
-    return canonical, fn, args, score
+    strict = fuzz.token_sort_ratio(' '.join(text.split()), ' '.join(canonical.split()))
+    return canonical, fn, args, score, strict

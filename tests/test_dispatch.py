@@ -247,6 +247,24 @@ def test_discord_navigation_proceeds_when_unprotected():
         essential.active, discord._discord_hwnd = orig_active, orig_hwnd
 
 
+# ── Fuzzy matcher must not silently misroute (regression) ─────────────────────
+
+def test_fuzzy_does_not_silently_misroute():
+    from core.dispatcher import dispatch
+    # A short catalog phrase as a subset of a longer utterance must NOT silently
+    # fire — it gets demoted to a confirmation prompt.
+    for p in ["make my app manager full screen", "full screen apps manager"]:
+        S.reset()
+        r = str(dispatch(p)).lower()
+        assert "did you mean" in r, (p, r)
+    # Unrelated phrases must not become "Unknown app: …" via the open-prefix retry.
+    for p in ["for untracked apps", "add another"]:
+        S.reset()
+        r = str(dispatch(p)).lower()
+        assert "not recognized" in r, (p, r)
+    S.reset()
+
+
 # ── Drop-in skills ────────────────────────────────────────────────────────────
 
 def test_all_intents_compile_and_are_callable():

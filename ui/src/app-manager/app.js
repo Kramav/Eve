@@ -124,49 +124,121 @@ function renderDiscovered() {
 }
 
 // ── Render: configured list ────────────────────────────────────────────────
+// Grouped by path so one program (e.g. firefox) shows once with ALL the names
+// you can call it by. Adding a name just appends another [name, path] entry —
+// the dispatcher resolves any spoken name to the same path, so aliases work
+// with no backend change. The flat `configured` array stays the source of truth.
+function groupConfigured() {
+  // → [{ path, items: [{ name, idx }] }] preserving first-seen order
+  const groups = []
+  const byPath = new Map()
+  configured.forEach(([name, path], idx) => {
+    const key = path.toLowerCase()
+    let g = byPath.get(key)
+    if (!g) { g = { path, items: [] }; byPath.set(key, g); groups.push(g) }
+    g.items.push({ name, idx })
+  })
+  return groups
+}
+
 function renderConfigured() {
   const list  = document.getElementById('configured-list')
   const empty = document.getElementById('configured-empty')
 
-  list.querySelectorAll('.config-row').forEach(el => el.remove())
+  list.querySelectorAll('.config-app').forEach(el => el.remove())
 
+  const groups = groupConfigured()
   document.getElementById('configured-count').textContent =
-    `${configured.length} app${configured.length !== 1 ? 's' : ''}`
+    `${groups.length} app${groups.length !== 1 ? 's' : ''}`
 
-  if (configured.length === 0) {
+  if (groups.length === 0) {
     if (empty) empty.style.display = ''
     return
   }
   if (empty) empty.style.display = 'none'
 
-  for (let i = 0; i < configured.length; i++) {
-    const [spoken, path] = configured[i]
-    const row = document.createElement('div')
-    row.className = 'config-row'
+  for (const g of groups) {
+    const card = document.createElement('div')
+    card.className = 'config-app'
 
-    const spokenInput = document.createElement('input')
-    spokenInput.className = 'config-spoken'
-    spokenInput.type = 'text'
-    spokenInput.value = spoken
-    spokenInput.title = 'Spoken name (what you say to open this app)'
-    spokenInput.addEventListener('input', () => {
-      configured[i] = [spokenInput.value, path]
-    })
-
+    // Header: path + remove-whole-app
+    const hdr = document.createElement('div')
+    hdr.className = 'config-app-hdr'
     const pathEl = document.createElement('div')
     pathEl.className = 'config-path'
-    pathEl.textContent = path
-    pathEl.title = path
+    pathEl.textContent = g.path
+    pathEl.title = g.path
+    const removeApp = document.createElement('button')
+    removeApp.className = 'remove-btn'
+    removeApp.textContent = '×'
+    removeApp.title = 'Remove this app and all its names'
+    removeApp.addEventListener('click', () => removeAppByPath(g.path))
+    hdr.append(pathEl, removeApp)
+    card.appendChild(hdr)
 
-    const removeBtn = document.createElement('button')
-    removeBtn.className = 'remove-btn'
-    removeBtn.textContent = '×'
-    removeBtn.title = 'Remove'
-    removeBtn.addEventListener('click', () => removeApp(path))
+    // One row per spoken name (each individually editable / removable)
+    const names = document.createElement('div')
+    names.className = 'config-names'
+    for (const { name, idx } of g.items) {
+      const row = document.createElement('div')
+      row.className = 'config-name-row'
 
-    row.append(spokenInput, pathEl, removeBtn)
-    list.appendChild(row)
+      const input = document.createElement('input')
+      input.className = 'config-spoken'
+      input.type = 'text'
+      input.value = name
+      input.title = 'A name you can say to open this app'
+      input.addEventListener('input', () => { configured[idx] = [input.value, g.path] })
+
+      const del = document.createElement('button')
+      del.className = 'remove-btn name-remove'
+      del.textContent = '×'
+      del.title = 'Remove this name'
+      del.addEventListener('click', () => removeName(idx))
+
+      row.append(input, del)
+      names.appendChild(row)
+    }
+
+    // Add-another-name row
+    const addRow = document.createElement('div')
+    addRow.className = 'config-name-row add-name'
+    const addInput = document.createElement('input')
+    addInput.className = 'config-spoken add-name-input'
+    addInput.type = 'text'
+    addInput.placeholder = '+ add another name…'
+    const commit = () => {
+      const v = addInput.value.trim()
+      if (!v) return
+      configured.push([v, g.path])
+      renderConfigured()
+    }
+    addInput.addEventListener('keydown', e => { if (e.key === 'Enter') commit() })
+    const addBtn = document.createElement('button')
+    addBtn.className = 'add-btn add-name-btn'
+    addBtn.textContent = '+'
+    addBtn.title = 'Add this name'
+    addBtn.addEventListener('click', commit)
+    addRow.append(addInput, addBtn)
+    names.appendChild(addRow)
+
+    card.appendChild(names)
+    list.appendChild(card)
   }
+}
+
+function removeName(idx) {
+  const path = configured[idx] && configured[idx][1]
+  configured.splice(idx, 1)
+  // If that was the last name for the path, the app is gone — keep checkboxes in sync.
+  if (path && !configured.some(([, p]) => p.toLowerCase() === path.toLowerCase())) {
+    uncheckDiscovered(path)
+  }
+  renderConfigured()
+}
+
+function removeAppByPath(path) {
+  removeApp(path)   // existing helper: drops all entries for the path + unchecks
 }
 
 // ── Toggle app selection ───────────────────────────────────────────────────
@@ -195,14 +267,19 @@ function toggleApp(app) {
 
 function removeApp(path) {
   const pathKey = path.toLowerCase()
-  selectedPaths.delete(pathKey)
   configured = configured.filter(([, p]) => p.toLowerCase() !== pathKey)
+  uncheckDiscovered(path)
   renderConfigured()
-  // Uncheck in discovered list
+}
+
+// Drop a path from the selected set and clear its check in the discovered list.
+function uncheckDiscovered(path) {
+  selectedPaths.delete(path.toLowerCase())
   const row = document.querySelector(`.app-row[data-path="${CSS.escape(path)}"]`)
   if (row) {
     row.classList.remove('selected')
-    row.querySelector('.app-check').textContent = ''
+    const check = row.querySelector('.app-check')
+    if (check) check.textContent = ''
   }
 }
 
@@ -239,7 +316,10 @@ document.getElementById('scan-btn').addEventListener('click', () => {
 
 document.getElementById('save-btn').addEventListener('click', () => {
   setStatus('Saving…')
-  send('save_apps', { apps: configured })
+  // Drop blank names (e.g. an alias field left empty) before persisting.
+  const clean = configured.filter(([n, p]) => n && n.trim() && p && p.trim())
+  configured = clean
+  send('save_apps', { apps: clean })
 })
 
 document.getElementById('add-btn').addEventListener('click', addManual)

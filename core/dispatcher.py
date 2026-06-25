@@ -221,11 +221,13 @@ INTENTS = [
     (r"(?:open|show|edit) (?:the )?(?:api keys?|integrations?|settings)",  system.open_integrations),
     (r"(?:close|quit|exit|dismiss) (?:the )?(?:api keys?|integrations?)",   system.close_integrations),
 
-    # App Manager — the broad "manage/edit/configure … apps" + "open apps" form
-    # comes from main.py's former pre-dispatch _MANAGE_APPS block. Must stay above
-    # apps.open_app so "open apps" opens the manager, not an app named "apps".
-    (r"\b(?:manage|open|show|edit|configure)\b.{0,20}\bapps?\b"
-     r"|\b(?:open|show|launch)\s+(?:the\s+)?app\s+manager\b",   system.open_app_manager),
+    # App Manager. Verb must sit DIRECTLY before "apps"/"app manager" — the old
+    # ".{0,20}apps" gap matched unrelated phrases ("for untracked apps", "show me
+    # the apps I downloaded"). Must stay above apps.open_app so "open apps" opens
+    # the manager, not an app literally named "apps".
+    (r"\b(?:manage|configure|edit)\s+(?:my\s+|the\s+)?apps?\b"
+     r"|\b(?:open|show|launch)\s+(?:the\s+|my\s+)?apps?\b"
+     r"|\b(?:open|show|launch|manage|edit|configure)\s+(?:the\s+)?app\s*manager\b",  system.open_app_manager),
     (r"(?:close|quit|exit|dismiss) (?:the )?app manager",      system.close_app_manager),
     (r"kill (?:the )?app manager",                             system.close_app_manager),
 
@@ -718,26 +720,39 @@ def _guess_dispatch(text: str):
     if result is not None:
         return result
 
-    # 3. prefix retry — catches bare names: "firefox", "window manager"
+    # 3. prefix retry — catches bare names: "firefox", "window manager".
+    #    But open_app's pattern matches ANY text and returns Silent("Unknown
+    #    app: …") for names it doesn't know, which would turn every unrecognized
+    #    phrase into "Unknown app: <phrase>". Only accept a *real* match.
     prefixed = f"open {corrected}"
     result = _try_intents(prefixed)
-    if result is not None:
+    if result is not None and not _is_unknown_app(result):
         return result
 
-    # 3. catalog scoring
+    # 4. catalog scoring
     catalog = intent_match.build_catalog()
     match   = intent_match.best_match(corrected, catalog)
     if match is None:
         return None
-    canonical, fn, args, score = match
+    canonical, fn, args, score, strict = match
 
-    if score >= intent_match.HIGH_THRESHOLD:
+    # Silent-exec only when BOTH the lenient (token_set) and strict (token_sort)
+    # scores are high — strict guards against a short catalog phrase matching as
+    # a subset of a much longer utterance (e.g. "make my app manager full
+    # screen" → "app manager"). Otherwise demote to a confirmation.
+    if score >= intent_match.HIGH_THRESHOLD and strict >= intent_match.STRICT_THRESHOLD:
         return fn(*args)
 
     # Medium confidence → store and ask. Next utterance handles yes/no.
     sess = _sess_mod.get()
     sess.pending_confirm = (fn, args, canonical)
     return Silent(f"Did you mean: {canonical}?")
+
+
+def _is_unknown_app(result) -> bool:
+    """True if `result` is open_app's 'Unknown app: …' Silent placeholder."""
+    from core.response import Silent
+    return isinstance(result, Silent) and str(result).lower().startswith("unknown app")
 
 
 # ── Yes/no confirmation handling (single-turn converse) ────────────────────
