@@ -7,6 +7,7 @@
   "tiling": true,
   "notifications": true,
   "game_protection": true,
+  "verify_commands": true,
   "inapp_search": false,
   "mpv_youtube": false
 }

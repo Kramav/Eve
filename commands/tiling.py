@@ -3,6 +3,8 @@ import ctypes.wintypes
 import json
 from pathlib import Path
 
+from core.response import Verified
+
 _LAYOUTS_FILE = Path(__file__).parent.parent / "tiling_layouts.json"
 _APPS_FILE    = Path(__file__).parent.parent / "apps.json"
 
@@ -664,7 +666,27 @@ def snap_app(app_name: str, zone_name: str, monitor_ref: str | None = None) -> s
         undo=lambda: _snap_hwnd_to_rect(captured_hwnd, prev_x, prev_y, prev_w, prev_h),
     ))
 
-    return f"Snapped {app_name} to {target_desc}"
+    # Verify the window actually landed in the zone. Some apps fight placement
+    # (snap back, clamp to a minimum size, or refuse when maximized), so confirm
+    # the rect is where we asked — within tolerance for borders/rounding — and
+    # re-issue the move once if it isn't.
+    def _at_target() -> bool:
+        r = ctypes.wintypes.RECT()
+        if not _u32.GetWindowRect(captured_hwnd, ctypes.byref(r)):
+            return False
+        cur_w, cur_h = r.right - r.left, r.bottom - r.top
+        tol = 16
+        return (abs(r.left - x) <= tol and abs(r.top - y) <= tol and
+                abs(cur_w - w) <= tol and abs(cur_h - h) <= tol)
+
+    return Verified(
+        f"Snapped {app_name} to {target_desc}",
+        check=_at_target,
+        on_fail=f"I tried to snap {app_name} to {target_desc}, but it didn't "
+                f"land there — it may be resisting placement.",
+        retry=lambda: _snap_hwnd_to_rect(captured_hwnd, x, y, w, h),
+        delay=0.5,
+    )
 
 
 def _describe_target(zone_name: str, monitor_ref: str | None) -> str:

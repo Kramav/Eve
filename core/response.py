@@ -3,6 +3,36 @@ class Silent(str):
     pass
 
 
+class Verified(str):
+    """An optimistic response whose side effect is confirmed before it's
+    reported. A handler returns the message it WOULD say on success, plus a way
+    to check the effect actually happened:
+
+      check():   () -> bool — True once the effect is observable.
+      on_fail:   message reported instead if it never confirms.
+      retry:     optional () -> None — run once if the first check fails, then
+                 the effect is re-checked (the user-chosen "retry once" policy).
+      announce:  optional message reported up front, BEFORE the check delay —
+                 e.g. "Opening Photoshop now, this may take a moment" for an app
+                 learned to be slow to launch.
+      delay:     seconds to wait before each check (most effects are async — a
+                 launched window or a paused printer take a beat to appear).
+
+    Resolved by `core.verify.resolve()`, wired into main.on_command behind the
+    `verify_commands` feature flag. Subclasses str, so any caller that doesn't
+    know about verification (e.g. a test) just sees the optimistic message."""
+
+    def __new__(cls, message, *, check, on_fail, retry=None, announce=None,
+                delay=1.0):
+        s = super().__new__(cls, message)
+        s.check    = check
+        s.on_fail  = on_fail
+        s.retry    = retry
+        s.announce = announce
+        s.delay    = float(delay)
+        return s
+
+
 class Panel(Silent):
     """A panel-open/close/toggle action. The handler has already done the work
     (opened/closed an Electron window) via the Display, so the dispatcher loop

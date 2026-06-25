@@ -6,9 +6,73 @@ import subprocess
 import threading
 import winreg
 from pathlib import Path
-from core.response import Silent
+from core.response import Silent, Verified
 
 _APPS_FILE = Path(__file__).parent.parent / "apps.json"
+
+# Adaptive per-app launch timing. open_app verifies the app actually started by
+# watching its process count; if a retry reveals the first launch HAD worked
+# (just slowly) we learn to wait longer next time, so we stop double-launching
+# slow apps. Persisted in app_launch_delays.json {appname: seconds}.
+_LAUNCH_FILE  = Path(__file__).parent.parent / "app_launch_delays.json"
+_BASE_DELAY   = 1.2    # default wait before the first launch check (seconds)
+_SLOW_ANNOUNCE = 2.5   # at/above this learned delay, warn "this may take a moment"
+_BUMP_STEP    = 1.5    # add this much when we detect a slow double-launch
+_DECAY_STEP   = 0.3    # shave this much after a clean first-try success
+_MAX_DELAY    = 8.0    # never wait longer than this
+
+_NO_WINDOW = 0x08000000  # subprocess.CREATE_NO_WINDOW — no console flash
+
+
+def _count_proc(exe: str) -> int:
+    """How many processes named *exe* (e.g. 'firefox.exe') are running."""
+    if not exe:
+        return 0
+    try:
+        out = subprocess.run(
+            ['tasklist', '/fi', f'imagename eq {exe}', '/nh'],
+            capture_output=True, text=True, creationflags=_NO_WINDOW).stdout
+    except Exception:
+        return 0
+    return out.lower().count(exe.lower())
+
+
+def _load_delays() -> dict:
+    try:
+        d = json.loads(_LAUNCH_FILE.read_text())
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_delays(d: dict) -> None:
+    try:
+        _LAUNCH_FILE.write_text(json.dumps(d, indent=2))
+    except Exception:
+        pass
+
+
+def _launch_delay(name: str) -> float:
+    return float(_load_delays().get(name.lower(), _BASE_DELAY))
+
+
+def _record_slow(name: str) -> None:
+    """The app launched but slowly enough that we double-launched it — wait
+    longer before judging it next time."""
+    d = _load_delays()
+    cur = float(d.get(name.lower(), _BASE_DELAY))
+    d[name.lower()] = min(_MAX_DELAY, cur + _BUMP_STEP)
+    _save_delays(d)
+
+
+def _record_fast(name: str) -> None:
+    """Confirmed on the first try — gently trim an inflated delay back down."""
+    d = _load_delays()
+    cur = float(d.get(name.lower(), _BASE_DELAY))
+    new = max(_BASE_DELAY, cur - _DECAY_STEP)
+    if new < cur:
+        d[name.lower()] = new
+        _save_delays(d)
 
 
 def find_firefox() -> str | None:
@@ -93,11 +157,19 @@ def open_app(name: str, snap_rect: tuple | None = None) -> str:
             snap_rect = None
 
     cmd = _resolve_exe(cmd)
-    try:
-        from core import monitor
-        before = monitor.snapshot_windows(min_size=0)  # include compact overlay so it's never misidentified as new
+
+    def _spawn():
         # SW_SHOWNOACTIVATE = 4: OS-level hint to open without stealing focus
         ctypes.windll.shell32.ShellExecuteW(None, "open", cmd, None, None, 4)
+
+    try:
+        from core import monitor
+        exe = os.path.basename(cmd)
+        verifiable = exe.lower().endswith(".exe")
+        proc_before = _count_proc(exe) if verifiable else 0
+
+        before = monitor.snapshot_windows(min_size=0)  # include compact overlay so it's never misidentified as new
+        _spawn()
         if snap_rect is not None:
             threading.Thread(
                 target=monitor.move_new_window_to_rect,
@@ -111,7 +183,50 @@ def open_app(name: str, snap_rect: tuple | None = None) -> str:
                 args=(before, target),
                 daemon=True,
             ).start()
-        return f"Opening {name}"
+
+        # Can't tie this command to a process image — report optimistically.
+        if not verifiable:
+            return f"Opening {name}"
+
+        # Already running? "open" just focuses/raises it — confirm quickly, and
+        # never retry (a second launch would spawn a duplicate window).
+        if proc_before > 0:
+            return Verified(
+                f"Opened {name}",
+                check=lambda: _count_proc(exe) >= proc_before,
+                on_fail=f"I tried to open {name} but couldn't confirm it.",
+                delay=0.4,
+            )
+
+        # Cold launch — wait the learned delay, then confirm a process appeared.
+        delay = _launch_delay(name)
+        announce = (f"Opening {name} now. This may take a moment."
+                    if delay >= _SLOW_ANNOUNCE else None)
+        state = {"retried": False, "recorded": False}
+
+        def _check():
+            cnt = _count_proc(exe)
+            ok = cnt > proc_before
+            if ok and not state["recorded"]:
+                state["recorded"] = True
+                if state["retried"] and (cnt - proc_before) >= 2:
+                    _record_slow(name)   # both launches took → wait longer next time
+                elif not state["retried"]:
+                    _record_fast(name)   # confirmed first try → trim the delay
+            return ok
+
+        def _retry():
+            state["retried"] = True
+            _spawn()
+
+        return Verified(
+            f"Opened {name}",
+            check=_check,
+            on_fail=f"I tried to open {name} twice but couldn't confirm it opened.",
+            retry=_retry,
+            announce=announce,
+            delay=delay,
+        )
     except Exception:
         return f"Couldn't open {name}"
 
@@ -127,9 +242,23 @@ def close_app(name: str) -> str:
     """Graceful close — sends WM_CLOSE, lets the app save and exit cleanly."""
     name = name.strip()
     exe  = _resolve_close_exe(name)
+
+    def _do():
+        subprocess.run(['taskkill', '/im', exe], capture_output=True,
+                       creationflags=_NO_WINDOW)
+
     try:
-        subprocess.run(f"taskkill /im {exe}", shell=True, capture_output=True)
-        return f"Closed {name}"
+        _do()
+        return Verified(
+            f"Closed {name}",
+            check=lambda: _count_proc(exe) == 0,
+            # A graceful close can stall on an unsaved-changes dialog — say so
+            # rather than claiming it closed.
+            on_fail=f"I asked {name} to close, but it's still running — "
+                    f"it may be waiting on you.",
+            retry=_do,
+            delay=0.8,
+        )
     except Exception:
         return f"Couldn't close {name}"
 
@@ -138,8 +267,19 @@ def kill_app(name: str) -> str:
     """Force kill — immediately terminates the process, no save prompt."""
     name = name.strip()
     exe  = _resolve_close_exe(name)
+
+    def _do():
+        subprocess.run(['taskkill', '/f', '/im', exe], capture_output=True,
+                       creationflags=_NO_WINDOW)
+
     try:
-        subprocess.run(f"taskkill /f /im {exe}", shell=True, capture_output=True)
-        return f"Killed {name}"
+        _do()
+        return Verified(
+            f"Killed {name}",
+            check=lambda: _count_proc(exe) == 0,
+            on_fail=f"I tried to kill {name}, but it's still running.",
+            retry=_do,
+            delay=0.6,
+        )
     except Exception:
         return f"Couldn't kill {name}"

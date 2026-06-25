@@ -14,6 +14,7 @@ DEFAULTS = {
     'tiling':       True,
     'notifications':   True,  # Windows toast on reminders (in addition to TTS)
     'game_protection': True,  # auto-protect a fullscreen/essential app from focus steal
+    'verify_commands': True,  # confirm a command's side effect happened, retry once, report honestly
     # ── Alpha (experimental) — default off, each has a fallback when off ──
     'inapp_search': False,   # off → search falls back to opening Firefox
     'mpv_youtube':  False,   # off → YouTube uses the HUD feed instead of mpv
@@ -32,6 +33,7 @@ LABELS = {
     'tiling':       'Window Tiling',
     'notifications':   'Reminder Notifications (toast)',
     'game_protection': 'Game / Focus Protection',
+    'verify_commands': 'Verify Commands Ran',
     'inapp_search': 'In-app Search Results (DDG)',
     'mpv_youtube':  'YouTube via mpv',
 }

@@ -22,9 +22,10 @@ import core.dispatcher as _dispatcher_mod
 from core.hot_reload import start as _start_hot_reload
 from core.speaker import Speaker
 from core.display import Display
-from core.response import Silent, Panel, VideoList, SiteList
+from core.response import Silent, Panel, VideoList, SiteList, Verified
 from core.session import get as _get_session, Mode as _Mode
 from core import features as _features
+from core import verify as _verify
 from commands.reminders import start_checker
 import commands.youtube as _yt_cmd
 import commands.system as _sys_cmd
@@ -102,6 +103,26 @@ def main():
             display.log("heard", text)
 
             response = _dispatcher_mod.dispatch(text)
+
+            # Post-execution verification: a handler may return a Verified
+            # response that knows how to confirm its own side effect. Speak the
+            # optimistic line up front (esp. the "this may take a moment" note
+            # for apps learned to be slow), then check — retrying once and
+            # reporting honestly if it never took. Feature-gated so the extra
+            # check latency is opt-out.
+            verify_ok = True
+            if isinstance(response, Verified):
+                if not _features.get('verify_commands'):
+                    response = str(response)            # skip the check entirely
+                else:
+                    if response.announce:
+                        display.update(status="Eve", text=response.announce,
+                                       color="processing")
+                        display.log("action", response.announce)
+                        if _features.get('tts'):
+                            speaker.speak(response.announce)
+                    response, verify_ok = _verify.resolve(response)
+
             print(f"Eve: {response}")
 
             # Panel actions (open/close/toggle a managed Electron window) are
@@ -137,8 +158,9 @@ def main():
                 display.set_mode("idle")
 
             if response:
-                display.update(status="Eve", text=response, color="processing")
-                display.log("action", response)
+                color = "processing" if verify_ok else "error"
+                display.update(status="Eve", text=response, color=color)
+                display.log("action" if verify_ok else "error", response)
                 if _features.get('tts'):
                     speaker.speak(response)
 

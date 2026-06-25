@@ -293,6 +293,128 @@ def test_skill_integration_through_dispatch():
     assert "rolled" in str(d.dispatch("roll 2d6")).lower()
 
 
+# ── 3D printer skill ──────────────────────────────────────────────────────────
+# Filename starts with a digit, so it can't be `import`ed normally; load it from
+# its path the same way core.skills does. No network is touched: routing is
+# checked against INTENTS, and handlers are exercised only with no printer
+# configured (the guidance path).
+
+def _printer_mod():
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "skills", "3dprinter.py")
+    spec = importlib.util.spec_from_file_location("eve_skill_3dprinter_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _printer_route(mod, text):
+    for pattern, handler in mod.INTENTS:
+        m = re.search(pattern, text)
+        if m:
+            return handler, m.groups()
+    return None, ()
+
+
+def test_printer_skill_loads():
+    from core import skills
+    names = skills.load(display=None)
+    assert "3dprinter" in names, names
+
+
+def test_printer_intents_route():
+    p = _printer_mod()
+    expect = {
+        "how's my print":         p._status,
+        "printer status":         p._status,
+        "is the print done":      p._status,
+        "how long left":          p._time_left,
+        "time remaining":         p._time_left,
+        "what's the nozzle temp": p._temps,
+        "is the bed hot":         p._temps,
+        "pause the print":        p._pause,
+        "resume printing":        p._resume,
+        "cancel the print":       p._cancel,
+        "abort the job":          p._cancel,
+        "preheat for petg":       p._preheat,
+        "warm up the printer":    p._preheat,
+        "cool down the printer":  p._cooldown,
+    }
+    for text, handler in expect.items():
+        hit, _ = _printer_route(p, text)
+        assert hit is handler, (text, getattr(hit, "__name__", hit))
+
+
+def test_printer_preheat_captures_material():
+    # The material is captured and passed positionally; a bare preheat is None.
+    p = _printer_mod()
+    _, groups = _printer_route(p, "preheat for petg")
+    assert groups == ("petg",), groups
+    _, groups = _printer_route(p, "preheat")
+    assert groups == (None,), groups
+
+
+def test_printer_backend_selection():
+    p = _printer_mod()
+    assert isinstance(p._BACKENDS["prusa"]({"host": "1.2.3.4", "api_key": "k"}),
+                      p.PrusaBackend)
+    assert isinstance(p._BACKENDS["bambu"]({"host": "1.2.3.4", "serial": "s",
+                                            "access_code": "c"}),
+                      p.BambuBackend)
+    # Missing required fields surface as a PrinterError, never a raw exception.
+    for cls, bad in ((p.PrusaBackend, {}), (p.BambuBackend, {"host": "x"})):
+        try:
+            cls(bad)
+            assert False, f"{cls.__name__} accepted incomplete config"
+        except p.PrinterError:
+            pass
+
+
+def test_printer_unknown_type_is_friendly():
+    p = _printer_mod()
+    orig = p._config
+    p._config = lambda: {"type": "ultimaker"}
+    try:
+        try:
+            p._backend()
+            assert False, "unknown type should raise"
+        except p.PrinterError as e:
+            assert "ultimaker" in str(e).lower()
+    finally:
+        p._config = orig
+
+
+def test_printer_unconfigured_speaks_guidance():
+    # With no printer configured, every handler returns spoken guidance instead
+    # of raising (which the skill loader would treat as a non-match) or hanging
+    # on the network.
+    p = _printer_mod()
+    orig = p._config
+    p._config = lambda: {}
+    try:
+        for fn in (p._status, p._temps, p._time_left, p._pause, p._cooldown,
+                   p._preheat):
+            assert "printer" in str(fn()).lower(), fn.__name__
+    finally:
+        p._config = orig
+
+
+def test_printer_cancel_requires_confirmation():
+    # Cancel is destructive: it arms Eve's single-turn yes/no confirmation and
+    # does NOT stop the print itself.
+    p = _printer_mod()
+    S.get().pending_confirm = None
+    try:
+        resp = p._cancel()
+        pending = S.get().pending_confirm
+        assert pending is not None and pending[2] == "cancel the print"
+        assert pending[0] is p._do_cancel
+        assert "confirm" in str(resp).lower()
+    finally:
+        S.get().pending_confirm = None
+
+
 # ── Zero-dependency runner ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
