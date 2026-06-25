@@ -5,6 +5,8 @@
   "reminders": true,
   "apps": true,
   "tiling": true,
+  "notifications": true,
+  "game_protection": true,
   "inapp_search": false,
   "mpv_youtube": false
 }

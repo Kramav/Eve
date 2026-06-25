@@ -104,7 +104,11 @@ def active() -> str | None:
     """Name of the protected program currently in the foreground, or None.
 
     Matches the saved list against the foreground exe/title; failing that,
-    auto-protects a borderless/fullscreen foreground app."""
+    auto-protects a borderless/fullscreen foreground app. Returns None when the
+    'game_protection' feature is toggled off (UI / App Manager)."""
+    from core import features
+    if not features.get('game_protection'):
+        return None
     exe, title = _foreground_exe_title()
     for name in list_all():
         if name and (name in exe or name in title):

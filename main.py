@@ -63,8 +63,9 @@ def main():
     def on_reminder(message: str):
         display.show(status="Reminder", text=message, color="listening")
         display.log("system", f"Reminder: {message}")
-        from core import notify
-        notify.toast("Reminder", message)   # persists in Action Center; best-effort
+        if _features.get('notifications'):
+            from core import notify
+            notify.toast("Reminder", message)   # persists in Action Center; best-effort
         speaker.speak(f"Reminder: {message}")
         time.sleep(3)
         display.hide()
