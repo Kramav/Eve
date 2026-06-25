@@ -1,6 +1,8 @@
+import json
 import queue
 import threading
 import time
+from pathlib import Path
 import sounddevice as sd
 import numpy as np
 from openwakeword.model import Model
@@ -9,13 +11,28 @@ from config import WAKE_WORD, SILENCE_THRESHOLD, SILENCE_DURATION_S, WAKE_COOLDO
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280  # 80ms — required by openwakeword
 
+_SETTINGS_FILE = Path(__file__).parent.parent / 'settings.json'
+
+
+def resolve_wake_word() -> str:
+    """User's chosen wake-word model name. Prefers settings.json `wake_word`
+    (set from the UI, no config edit needed); falls back to config.WAKE_WORD."""
+    try:
+        w = json.loads(_SETTINGS_FILE.read_text()).get('wake_word')
+        if w and str(w).strip():
+            return str(w).strip()
+    except Exception:
+        pass
+    return WAKE_WORD
+
 
 class Listener:
     _MAX_RECORD_CHUNKS = 375  # ~30 second hard cap
 
     def __init__(self):
-        print(f"Loading wake word model ({WAKE_WORD})...")
-        self._model        = Model(wakeword_models=[WAKE_WORD], inference_framework="onnx")
+        self._wake_word = resolve_wake_word()
+        print(f"Loading wake word model ({self._wake_word})...")
+        self._model        = Model(wakeword_models=[self._wake_word], inference_framework="onnx")
         self._q:           queue.Queue    = queue.Queue()
         self._is_speaking: threading.Event | None = None
         self.enabled                              = True
@@ -77,7 +94,7 @@ class Listener:
             if reset_pending:
                 self._model.reset()
                 reset_pending = False
-            if self._model.predict(chunk).get(WAKE_WORD, 0) > 0.5:
+            if self._model.predict(chunk).get(self._wake_word, 0) > 0.5:
                 return
 
     def _record_command(self) -> np.ndarray:

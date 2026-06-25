@@ -22,8 +22,8 @@ from pathlib import Path
 # can filter for the messages they care about.
 
 from core import features as _features
+from config import WS_HOST, WS_PORT
 
-WS_PORT        = 7734
 APPS_FILE      = Path(__file__).parent.parent / 'apps.json'
 SETTINGS_FILE  = Path(__file__).parent.parent / 'settings.json'
 
@@ -82,7 +82,7 @@ class Display:
             finally:
                 self._clients.discard(ws)
 
-        async with websockets.serve(handler, '127.0.0.1', WS_PORT):
+        async with websockets.serve(handler, WS_HOST, WS_PORT):
             await asyncio.Future()
 
     def _snapshot(self):

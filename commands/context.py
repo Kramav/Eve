@@ -141,3 +141,50 @@ def cancel_last() -> str:
         return f"Couldn't cancel: {e}"
     s.last_action = None
     return f"Cancelled: {desc}."
+
+
+# ── Protected / essential programs ───────────────────────────────────────
+
+def protect_program(name: str = '') -> str:
+    """Voice: 'treat X as essential' / 'protect X' / 'this is my game'.
+    No name → protect whatever's currently in the foreground."""
+    from core import essential
+    name = (name or '').strip().lower()
+    if not name:
+        name = essential.foreground_name()
+        if not name:
+            return "I can't tell what's in front. Try 'protect <name>'."
+    if essential.add(name):
+        return f"Protecting {name}. I won't steal focus from it."
+    return f"{name} is already protected."
+
+
+def unprotect_program(name: str = '') -> str:
+    """Voice: 'stop protecting X' / 'that's not essential' (no name → current
+    foreground)."""
+    from core import essential
+    name = (name or '').strip().lower()
+    if not name:
+        name = essential.foreground_name()
+        if not name:
+            return "Stop protecting what?"
+    if essential.remove(name):
+        return f"No longer protecting {name}."
+    return f"{name} wasn't on the protected list."
+
+
+def list_protected() -> str:
+    """Voice: 'what's protected' / 'what are you protecting'."""
+    from core import essential
+    names = essential.list_all()
+    act = essential.active()
+    if not names and not act:
+        return "Nothing is protected right now."
+    parts = []
+    if names:
+        parts.append("Protected: " + ", ".join(names) + ".")
+    if act and act not in names:
+        parts.append(f"Currently deferring to {act} (fullscreen).")
+    elif act:
+        parts.append(f"{act} is active now.")
+    return " ".join(parts)

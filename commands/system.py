@@ -3,13 +3,15 @@ from datetime import datetime
 from pathlib import Path
 import pyautogui
 
+from core.response import Panel
+
 
 def open_editor() -> str:
     """Open the inline Electron command-editor panel (replaces the legacy
     tkinter editor.py subprocess)."""
     if _display is not None:
         _display.open_command_editor()
-    return "Opening command editor"
+    return Panel("Opening command editor")
 
 
 def close_editor() -> str:
@@ -57,9 +59,11 @@ def media_prev() -> str:
 
 
 def screenshot() -> str:
-    path = Path.home() / "Desktop" / f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    from config import SCREENSHOT_DIR
+    SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    path = SCREENSHOT_DIR / f"screenshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
     pyautogui.screenshot(str(path))
-    return "Screenshot saved to desktop"
+    return f"Screenshot saved to {SCREENSHOT_DIR.name}"
 
 
 def sleep_pc() -> str:
@@ -118,13 +122,13 @@ def toggle_voice() -> str:
 def open_app_manager() -> str:
     if _display is not None:
         _display.open_app_manager()
-    return "Opening app manager"
+    return Panel("Opening app manager")
 
 
 def open_window_manager() -> str:
     if _display is not None:
         _display.open_window_manager()
-    return "Opening window manager"
+    return Panel("Opening window manager")
 
 
 def open_integrations() -> str:
@@ -154,19 +158,27 @@ def close_window_manager() -> str:
 def open_voice_settings() -> str:
     if _display is not None:
         _display.open_voice_settings()
-    return "Opening voice settings"
+    return Panel("Opening voice settings")
 
 
 def show_directory() -> str:
     if _display is not None:
         _display.show_directory()
-    return "Showing the directory"
+    return Panel("Showing the directory")
 
 
 def hide_directory() -> str:
     if _display is not None:
         _display.hide_directory()
-    return "Hiding the directory"
+    return Panel("Hiding the directory")
+
+
+def toggle_overlay() -> str:
+    """Flip the HUD / routing-directory overlay. Replaces main.py's former
+    _OVERLAY_TOGGLE pre-dispatch shortcut."""
+    if _display is not None:
+        _display.toggle_overlay()
+    return Panel("")
 
 
 def identify_monitors() -> str:

@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import dispatcher as d
 from core import features, session as S
-from commands import (apps, search, system, youtube, windows as windows_cmd)
+from commands import (apps, search, system, youtube, windows as windows_cmd,
+                      tiling, context as ctx_cmd, window_manager as wm)
 
 
 def route(text: str):
@@ -61,12 +62,30 @@ def test_panels_open_close():
 
 
 def test_directory_and_identify():
-    assert route("show overlay") is system.show_directory
-    assert route("open hud") is system.show_directory
-    assert route("hide hud") is system.hide_directory
+    # overlay/hud/log/history TOGGLE (consolidated from main.py's former
+    # pre-dispatch _OVERLAY_TOGGLE; dispatch() is now the single router).
+    assert route("show overlay") is system.toggle_overlay
+    assert route("open hud") is system.toggle_overlay
+    assert route("hide hud") is system.toggle_overlay
+    assert route("toggle hud") is system.toggle_overlay
+    assert route("hud") is system.toggle_overlay
+    # the routing-directory WINDOW (distinct from the HUD overlay toggle)
+    assert route("show directory") is system.show_directory
+    assert route("hide directory") is system.hide_directory
     assert route("identify monitors") is system.identify_monitors
     assert route("identify zones") is system.identify_zones
     assert route("what's open") is windows_cmd.identify_windows
+
+
+def test_consolidated_panel_routing():
+    # Former main.py pre-dispatch blocks now live in INTENTS only.
+    assert route("voice settings") is system.open_voice_settings          # bare form
+    assert route("voice manager") is system.open_voice_settings
+    assert route("open apps") is system.open_app_manager                  # _MANAGE_APPS
+    assert route("manage apps") is system.open_app_manager
+    assert route("configure my apps") is system.open_app_manager
+    assert route("open command editor") is system.open_editor
+    assert route("open window manager") is system.open_window_manager
 
 
 # ── Apps ──────────────────────────────────────────────────────────────────────
@@ -114,6 +133,59 @@ def test_mishear_subs():
     assert d._apply_mishear_subs("please open firefox").strip() == "open firefox"
 
 
+# ── Protected / essential programs ───────────────────────────────────────────
+
+def test_protected_programs():
+    assert route("protect elden ring") is ctx_cmd.protect_program
+    assert route("treat elden ring as essential") is ctx_cmd.protect_program
+    assert route("this is my game") is ctx_cmd.protect_program
+    assert route("stop protecting elden ring") is ctx_cmd.unprotect_program
+    assert route("what's protected") is ctx_cmd.list_protected
+    # Must not be swallowed by snap/open_app
+    assert route("protect discord") is ctx_cmd.protect_program
+
+
+# ── Workspace presets ─────────────────────────────────────────────────────────
+
+def test_workspace_presets():
+    assert route("save layout as work") is tiling.save_workspace
+    assert route("save this layout gaming") is tiling.save_workspace
+    assert route("restore work layout") is tiling.restore_workspace
+    assert route("restore the gaming layout") is tiling.restore_workspace
+    assert route("load layout work") is tiling.restore_workspace
+    assert route("what layouts do i have") is tiling.list_workspaces
+
+
+# ── Auto-snap on launch ───────────────────────────────────────────────────────
+
+def test_auto_snap_assignment():
+    assert route("always open firefox in top-left") is tiling.set_app_zone
+    assert route("always open discord in right zone on monitor 2") is tiling.set_app_zone
+    assert route("auto snap spotify to bottom") is tiling.set_app_zone
+    assert route("auto-snap code to left") is tiling.set_app_zone
+    assert route("stop auto-snapping firefox") is tiling.clear_app_zone
+    # Plain "open firefox" must still launch, not be eaten by the assignment intents
+    assert route("open firefox") is apps.open_app
+
+
+# ── Monitor naming + per-zone HUD targeting ──────────────────────────────────
+
+def test_monitor_naming():
+    assert route("name monitor 2 primary display") is wm.name_monitor
+    assert route("label display 1 gaming") is wm.name_monitor
+    assert route("name the left monitor coding") is wm.name_monitor
+
+
+def test_hud_zone_monitor_targeting():
+    # "move hud to <zone> of monitor N" snaps the panel, not just relocates orb
+    assert route("move hud to top-left of monitor 1") is d._snap_hud_zone_monitor
+    assert route("snap hud to bottom-right of monitor 2") is d._snap_hud_zone_monitor
+    # Bare "move hud to monitor 2" (no zone) still relocates the orb
+    assert route("move hud to monitor 2") is wm.move_hud
+    # "move hud to top-left" (no monitor) still pins the orb to a corner
+    assert route("move hud to top-left") is wm.move_orb_corner
+
+
 # ── BROWSING mode routing (YouTube HUD) ──────────────────────────────────────
 # _dispatch_browsing executes feed handlers, but with no Display wired they are
 # safe no-ops that return their spoken-confirmation strings.
@@ -131,6 +203,76 @@ def test_browsing_mode_commands():
         assert d._dispatch_browsing("what time is it") is None
     finally:
         S.get().mode = prev_mode
+
+
+# ── Startup on login ──────────────────────────────────────────────────────────
+
+def test_autostart_routing():
+    assert route("add eve to startup") is d._autostart_enable
+    assert route("start eve when i log in") is d._autostart_enable
+    assert route("remove eve from startup") is d._autostart_disable
+    assert route("don't start eve at login") is d._autostart_disable
+    # "start eve on login" must not be eaten by apps.open_app
+    assert route("start eve on login") is d._autostart_enable
+    assert route("start eve on login") is not apps.open_app
+
+
+# ── Discord defers to a protected program (execution, light monkeypatch) ──────
+
+def test_discord_navigation_defers_when_protected():
+    from core import essential
+    from commands import discord
+    orig = essential.active
+    try:
+        essential.active = lambda: "eldenring"          # pretend a game is active
+        for fn in (discord.next_channel, discord.prev_server, discord.quick_switcher):
+            msg = fn().lower()
+            assert "protected" in msg and "eldenring" in msg, (fn.__name__, msg)
+        send = discord.send_message("alice", "hi").lower()
+        assert "protected" in send
+    finally:
+        essential.active = orig
+
+
+def test_discord_navigation_proceeds_when_unprotected():
+    from core import essential
+    from commands import discord
+    orig_active, orig_hwnd = essential.active, discord._discord_hwnd
+    try:
+        essential.active = lambda: None                 # nothing protected
+        discord._discord_hwnd = lambda: None            # Discord "not open"
+        # With nothing protected, it gets past the gate to the hwnd check.
+        assert "isn't open" in discord.next_channel().lower()
+    finally:
+        essential.active, discord._discord_hwnd = orig_active, orig_hwnd
+
+
+# ── Drop-in skills ────────────────────────────────────────────────────────────
+
+def test_all_intents_compile_and_are_callable():
+    # Guards the hand-ordered regex wall: a typo'd pattern or a misreferenced
+    # handler fails here instead of silently at runtime.
+    for pattern, handler in d.INTENTS:
+        re.compile(pattern)
+        assert callable(handler), pattern
+
+
+def test_skill_loading():
+    from core import skills
+    names = skills.load(display=None)
+    assert "example_dice" in names, names
+    assert "rolled" in (skills.dispatch("roll a die") or "").lower()
+    coin = (skills.dispatch("flip a coin") or "").lower()
+    assert "heads" in coin or "tails" in coin, coin
+    # Non-skill text returns None so the dispatcher falls through to fallback.
+    assert skills.dispatch("what time is it") is None
+
+
+def test_skill_integration_through_dispatch():
+    # A skill phrase with no built-in match routes through dispatch() to the skill.
+    from core import skills
+    skills.load(display=None)
+    assert "rolled" in str(d.dispatch("roll 2d6")).lower()
 
 
 # ── Zero-dependency runner ────────────────────────────────────────────────────

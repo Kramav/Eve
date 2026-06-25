@@ -8,71 +8,50 @@ Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2**
 
 > These must be resolved before Eve can be shared publicly or accept outside contributors.
 
-### 1. Platform scope decision
-Eve is deeply Windows-specific (pyautogui, win32 APIs, Electron shell calls, `.lnk` scanning). **Decide: lean in and own "best voice assistant for Windows," or scope out Win32 dependencies for cross-platform support.** Either is valid — but the choice drives architecture decisions downstream.
+### 1. Platform scope decision — *DECIDED: own Windows*
+**Decision (2026-06-24): Eve is a Windows-first voice assistant — "the best voice assistant for Windows."** Rationale: the entire value layer is already Win32-native and hard to abstract without gutting it — DPI-aware tiling, `raise_to_top_no_focus`/foreground-lock z-order tricks, `EnumWindows` identification, the HKCU autostart key, WinRT toasts, `.lnk` app scanning, Discord global-keybind injection, borderless-fullscreen game detection. Cross-platform would mean reimplementing all of it per-OS (or dropping it), turning Eve's differentiator into its weakest feature. Going deep on Windows is the higher-leverage bet.
 
-### 2. Test suite — *started*
-Started: `tests/test_dispatch.py` covers INTENTS routing, BROWSING mode routing, feature-gating, and mishear substitutions (runs under `pytest` or standalone via `python tests/test_dispatch.py`; tests routing without executing handlers). Caught + fixed two real bugs (date regex gap, missing voice-settings intent). **Remaining:** extend to tiling snaps, reminders, and Discord (need light monkeypatching since those handlers have side effects).
+**Consequences / guardrails:**
+- New Win32 usage is fine and encouraged; no need to gate it behind a platform abstraction.
+- Keep OS calls funneled through `core/` helpers (`window_ops`, `key_ops`, `monitor`, `autostart`, `notify`) rather than scattering `ctypes` across `commands/` — so *if* a port is ever wanted, the surface is contained. (This is good hygiene, not a cross-platform promise.)
+- README/marketing should say "Windows 10/11" plainly so nobody expects macOS/Linux.
+- `setup.py` already checks for Windows-only deps; no change needed.
 
-### 3. Plugin/skill system
-Adding a new command currently requires editing `core/dispatcher.py` directly. External contributors need a way to drop in a skill file without touching core. See P3 "Skill entry points" — promote to P0 for public release.
+### 2. Test suite — *expanded*
+`tests/test_dispatch.py` covers INTENTS routing (protected-programs, workspace presets, monitor naming, per-zone HUD targeting, auto-snap, consolidated panel routing), BROWSING mode, feature-gating, mishear subs, **skill loading + integration**, and an `INTENTS`-compile/handler guard. **Execution tests added:** `tests/test_timeparse.py` (12 deterministic cases for relative/absolute/recurring/split parsing via injected `now` — no mocks); Discord focus-deferral (`test_discord_navigation_defers_when_protected` / `…_proceeds_when_unprotected`, light monkeypatch of `essential.active` + `_discord_hwnd`). Tiling is covered by routing tests + the `_best_open_window` self-check (`python commands/tiling.py`). Both files run under `pytest tests/` or standalone. **Remaining:** reminders *scheduler* re-arm logic (recurring re-fire) still untested — needs a fake clock around `commands.reminders` checker.
 
-### 4. Remove hardcoded assumptions
-Port `7734`, `hey_jarvis` as default wake word, and several file paths are hardcoded outside of `config.py`. All user-facing settings should be overridable from `config.py` or `settings.json`.
+### 3. Plugin/skill system — *DONE*
+~~Adding a new command required editing `core/dispatcher.py`.~~ **Done:** [core/skills.py](core/skills.py) imports every `skills/*.py` at startup (`skills.load(display)` from main.py) and collects each file's module-level `INTENTS` list (same `(regex, handler)` shape as built-ins). Optional `PRIORITY` (ordering among skills), `FEATURE` (gate on features.json), and `setup(display)` hook. Skill intents are tried in `dispatch()` after built-ins and before the fuzzy/LLM fallback, so they extend without overriding. Import/handler errors are caught + logged so one bad skill can't crash Eve. Ships with [skills/example_dice.py](skills/example_dice.py) (roll/flip) + [skills/README.md](skills/README.md). Tests: `test_skill_loading`, `test_skill_integration_through_dispatch`. This also supersedes P3 "Skill entry points" (file-drop is simpler than pyproject entry points for this use case).
 
-### 5. Distribution
-A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manifest) is the difference between "developers only" and "anyone can install it." Inno Setup or NSIS can wrap the Electron build + Python env into a single installer.
+**Related smell — the dispatcher is a hand-ordered ~350-line regex wall.** Still true for *built-in* intents (skills don't need it — they're priority-ordered). Interim guard added: `test_all_intents_compile_and_are_callable` fails on a typo'd pattern or misreferenced handler. A full "no two patterns both match canonical phrase X" self-check is still worth adding if the built-in table keeps growing.
+
+### 3a. Delete the duplicate pre-dispatch routing in `main.py` — *DONE*
+~~`main.py`'s `on_command` ran 7 hardcoded regex blocks before `dispatch()`, shadowing INTENTS.~~ **Done:** the 7 blocks + regex constants are deleted; `dispatch()` is now the single routing authority. New `core.response.Panel` (subclass of `Silent`) marks panel open/close/toggle actions so main.py hides the HUD immediately and doesn't speak — preserving the former silent + delay-0 UX. New `system.toggle_overlay` + a top-of-INTENTS toggle intent preserve the "show/hide/bare hud toggles the overlay" behavior; voice-settings + app-manager intents broadened to absorb the bare "voice settings" / "manage apps" / "open apps" forms. Routing tests updated (`test_directory_and_identify`, `test_consolidated_panel_routing`) — they now assert the *real* app behavior instead of the old dead-code path. Residual intentional in-dispatcher overlap (toggle above show/hide for hud) is by design and is what the #3 startup self-check would whitelist.
+
+### 3b. Verify-by-running gap
+Recent features (focus-essential, workspace presets, monitor naming, Ollama fallback, auto-snap on launch) were verified by tracing regex + signatures, **not** by executing `tests/test_dispatch.py` or launching the app (run prompts were declined). "Done" currently carries an asterisk until the self-checks (`python core/essential.py`, `python commands/tiling.py`) and `python tests/test_dispatch.py` are run green, and a manual smoke of one snap / one protect command confirms the Win32 paths actually fire. Low effort, removes the asterisk.
+
+### 4. Remove hardcoded assumptions — *mostly done*
+**Done:** WS port/host centralized to `config.WS_PORT`/`WS_HOST` (display.py imports them; env-overridable via `EVE_WS_PORT`/`EVE_WS_HOST`). Wake word already lived in `config.WAKE_WORD`; the dispatcher's hardcoded spoken-prefix tuple is now `config.WAKE_PREFIXES` (`EVE_WAKE_PREFIXES`). Screenshot dir → `config.SCREENSHOT_DIR` (`EVE_SCREENSHOT_DIR`). **Remaining/deferred:** the Electron renderer files still hardcode `ws://127.0.0.1:7734` in their CSP `connect-src` + `WS_URL` (8 files) — a build-time inject is only worth it if a configurable port is ever actually needed (ponytail). Data-file paths (`apps.json`, `settings.json`, `tiling_layouts.json`, `eve_memory.json`) are repo-relative and deterministic, not user-facing settings — intentionally left as-is.
+
+### 5. Distribution — *script ready, build step pending*
+**Done:** [installer/eve.iss](installer/eve.iss) — an Inno Setup 6 script that wraps a pre-built `dist\Eve\` folder into `Eve-Setup-<ver>.exe` with Start Menu shortcut, optional desktop icon, optional run-at-login (writes the same HKCU Run key as `core/autostart.py`, removed on uninstall), and an uninstaller. Per-user install (no admin prompt). [installer/README.md](installer/README.md) documents the two-stage build (Electron UI → PyInstaller onedir freeze of `main.py` with the right `--add-data`/`--collect-all` flags) and a winget follow-up. **Remaining:** actually run the build toolchain (PyInstaller + npm) to produce `dist\Eve\` and `iscc` it — needs a Windows box with the toolchain; expect to iterate the PyInstaller hidden-imports for openwakeword/piper/sounddevice the first time.
 
 ---
 
 ## P1 — High Priority
 
-### Focus / Game Awareness
-- **"Focus & front essential" programs** — let the user designate a program (typically a
-  game) as *essential to current use*: Eve must never steal focus from it, and its window
-  should stay in front of / be protected from Eve's overlays. The set is **dynamic** —
-  changeable by voice ("treat X as essential" / "this is my game" / "stop protecting X") and
-  ideally auto-detected (a borderless/fullscreen foreground app becomes the current essential
-  while it's focused). Builds directly on the existing no-focus machinery: every Eve action
-  already routes through `core/window_ops.raise_to_top_no_focus` (lowers the foreground
-  without `SetForegroundWindow`) and `showInactive()` overlays — this feature makes the
-  "protected" target explicit and persistent instead of "whatever happens to be foreground."
-  Store the essential list in `settings.json`; gate focus-affecting paths (Discord nav focus
-  swap in `commands/discord.py`, app launches, panel opens) on it so they defer to or skip
-  stealing focus when an essential program is active.
-
-### Tiling / Window Management
-- **Workspace presets** — save all current window positions as a named preset, restore by voice.
-  "save layout as work", "restore work layout". Store in `tiling_layouts.json` under a `workspaces` key.
-  Python: `core/window_manager.py` already has `enumerate_windows()` as the foundation.
-- **Custom monitor naming + per-zone targeting** — phases 1 + 2 done (visual identify and voice
-  preset application / HUD move). Remaining: "Name monitor 2 Primary display" (display-only label
-  saved in `tiling_layouts.json`) and "Move HUD window 1 top-left" (snap the routing-directory
-  panel into a specific named zone on a specific monitor by voice).
-
 ### TTS
-- **Change TTS Tone** — default Piper voice (`en_US-lessac-medium`) sounds bad. Voice swap is now
-  fully wired (drop `.onnx` + `.onnx.json` pair into `models/voices/`, pick from Voice Settings
-  dropdown), so this is just a matter of grabbing a better voice from
-  https://huggingface.co/rhasspy/piper-voices and selecting it.
+- **Change TTS Tone** — *addressed via the Kokoro engine* (see Completed). Piper voice swap is
+  still wired for the lightweight path; for a big quality jump set `TTS_ENGINE=kokoro` and drop the
+  two Kokoro model files in `models/kokoro/`. **Remaining (user step):** `pip install kokoro-onnx`
+  + download the model files, then pick a voice. No code left.
 
 ---
 
 ## P2 — Medium Priority
 
-### Fallback
-- **LLM fallback via Ollama** — when no intent matches and the catalog score is below MED threshold,
-  route to a local Ollama model instead of returning "not recognized." Config: `FALLBACK_LLM = "ollama"`
-  / `"none"`. Model: `llama3` or `mistral`. Keeps Eve useful for general questions without cloud
-  dependency. Add at bottom of `dispatch()` in `core/dispatcher.py`, just before the final
-  "Not recognized" return. **Higher priority if going public** — "not recognized" frequently will
-  frustrate users who can't add custom commands.
-
-### Tiling / Window Management
-- **Auto-snap on launch** — if an app has a saved zone assignment, auto-snap it when opened via
-  voice rather than centering on monitor. Requires a zone-per-app mapping in `tiling_layouts.json`.
-  `commands/apps.py` open_app() checks tiling config and calls `move_new_window_to_rect` with the
-  saved zone rect.
+_All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap on launch)._
 
 ---
 
@@ -88,23 +67,33 @@ A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manif
 ### Architecture
 - **STT abstraction layer** — abstract `core/transcriber.py` behind an `STTEngine` interface.
   Allows swapping Whisper for Vosk (faster/smaller) or cloud STT via config, no code change.
-- **Skill entry points** — dynamic plugin loading via `pyproject.toml` entry points instead of
-  hardcoded imports. Enables external custom skill packages. **Promoted to P0 if going public.**
-- **Testing framework** — pytest suite for dispatcher regex patterns, integration tests for
-  multi-step commands. Catch regressions when adding new intents.
+  **Deferred (YAGNI):** there is exactly one STT implementation today; build the interface when a
+  second engine is actually wanted, not before. Adding it now is a speculative abstraction.
+- ~~**Skill entry points**~~ — superseded by the P0 #3 drop-in skill loader (`skills/*.py`,
+  [core/skills.py](core/skills.py)). `pyproject.toml` entry points would only be needed if skills
+  ship as installable PyPI packages; the file-drop covers the stated use case.
+- ~~**Testing framework**~~ — covered by P0 #2: `tests/test_dispatch.py` + `tests/test_timeparse.py`
+  (routing, execution, skills, compile guard); zero-dep runners + pytest.
 
 ### Voice / UX
-- **Wake word customization** — allow users to set a custom wake word via the App Manager UI
-  rather than editing `config.py`. Store in `settings.json`.
+- **Wake word customization** — *backend done*: `core/listener.resolve_wake_word()` prefers
+  `settings.json` `wake_word` over `config.WAKE_WORD`, so the wake word is overridable without a
+  code edit (takes effect on next launch — the model loads once at startup). **Remaining:** an App
+  Manager UI field to pick from available openwakeword models + write `settings.json`.
 - **Confidence scores** — return confidence alongside responses; surface low-confidence matches
   with a confirmation prompt rather than executing blindly. (Partly done — see `intent_match.py`
   tiered confidence; could be extended to in-pipeline intents.)
 
 ### Platform
-- **Windows notification integration** — use Windows toast notifications for reminders instead of
-  (or in addition to) TTS. `winotify` or `plyer` library.
-- **Startup on login** — register Eve in Windows startup via registry or Task Scheduler.
-  Currently requires manual launch.
+- ~~**Windows notification integration**~~ — *done*: `core/notify.toast(title, body)` fires a native
+  WinRT toast via PowerShell (no new dependency, runs under the built-in PowerShell AppUserModelID,
+  title/body passed as env vars so no quoting/injection). Wired into the reminder callback in
+  `main.py` alongside TTS; best-effort (any failure swallowed). Persists in the Action Center.
+- ~~**Startup on login**~~ — *done*: `core/autostart.py` registers `"<pythonw>" "<repo>/main.py"`
+  in the HKCU `…\CurrentVersion\Run` key (no admin, reversible). Voice: "add eve to startup" /
+  "start eve when I log in" / "remove eve from startup" / "don't start eve at login" → dispatcher
+  `_autostart_enable`/`_disable`/`_status` shims (placed above apps-open so "start eve on login"
+  isn't read as launching an app). Tests: `test_autostart_routing`.
 
 ---
 
@@ -112,6 +101,21 @@ A packaged release (GitHub Releases with a `.exe` installer, or a `winget` manif
 
 | Feature | Notes |
 |---------|-------|
+| STT speed+accuracy | `WHISPER_MODEL="auto"` ([config.py](config.py)) → `transcriber._resolve_model()` picks `distil-large-v3` on GPU / `distil-small.en` on CPU (both faster *and* more accurate than the old `small.en`). transcribe() tuned for short commands: `condition_on_previous_text=False` (no cross-command hallucination), `temperature=0.0` (deterministic, fastest decode), VAD filter. Pairs with the GPU device option |
+| Kokoro TTS engine | `core/speaker.py` refactored to a small engine interface (`synth`/`set_params`/`voice_id`); `TTS_ENGINE=piper`(default)/`kokoro`/`auto`. `_KokoroEngine` uses `kokoro-onnx` (no torch) + models in `models/kokoro/`; `_make_engine()` falls back to Piper if Kokoro is requested but unavailable, so TTS never dies. `list_voices()` + `features._compute_status` are engine-aware. Answers the P1 "change TTS tone" item — far more natural than Piper lessac. User step: `pip install kokoro-onnx` + download `kokoro-v1.0.onnx`/`voices-v1.0.bin` |
+| Tool-calling LLM fallback | `commands/fallback.py` upgraded from plain Q&A to Ollama **function calling**: 9 tools map to real handlers (open/close app, snap window, bring-to-front, web search, go-to-site, play YouTube, set timer/reminder), each feature-gated. `dispatch()` → `fallback.answer()` now executes weird-phrasing commands the regex misses ("could you throw firefox on my left screen"). Graceful degradation: chat/tools → plain `/api/generate` → None. Needs a tool-capable Ollama model (llama3.1+/qwen3/mistral-nemo) + `FALLBACK_LLM=ollama` |
+| Whisper GPU option | `config.WHISPER_DEVICE` (`auto`/`cuda`/`cpu`) + `WHISPER_COMPUTE` (env `EVE_WHISPER_DEVICE`/`_COMPUTE`). `transcriber._resolve_device_compute()` auto-probes for an NVIDIA GPU via `ctranslate2.get_cuda_device_count()` and falls back to CPU; defaults float16 on GPU / int8 on CPU. Runtime safety net: if the GPU model load throws (cuDNN/driver), it degrades to CPU instead of failing to start. Was hardcoded `cpu`/`int8` |
+| Drop-in skill system (P0 #3) | `core/skills.py` loads `skills/*.py` at startup; each defines `INTENTS` (+ optional `PRIORITY`/`FEATURE`/`setup`). Tried in `dispatch()` after built-ins, before fuzzy/LLM. `skills/example_dice.py` + `skills/README.md`. Supersedes "skill entry points" |
+| Single-router consolidation (P0 #3a) | Deleted main.py's 7 pre-dispatch regex blocks; `dispatch()` is the only router. `core.response.Panel` marks panel actions (silent + delay-0); `system.toggle_overlay` + top-of-INTENTS toggle intent preserve HUD-toggle behavior |
+| Config centralization (P0 #4) | `config.WS_PORT`/`WS_HOST`/`WAKE_PREFIXES`/`SCREENSHOT_DIR` (all env-overridable); display/dispatcher/system import them. Renderer WS port + repo-relative data paths intentionally left |
+| Startup on login (P3) | `core/autostart.py` HKCU Run-key register/unregister; voice "add eve to startup" / "don't start eve at login" |
+| Windows toast notifications (P3) | `core/notify.toast()` WinRT toast via PowerShell (no new dep, env-var args); fires on reminders alongside TTS, best-effort |
+| Wake-word override (P3, backend) | `core/listener.resolve_wake_word()` prefers `settings.json` `wake_word` over `config.WAKE_WORD`; UI picker still TODO |
+| Auto-snap on launch | Per-app default zone in `tiling_layouts.json` → `app_zones` `{app: {zone, monitor?}}`. "always open firefox in top-left" / "auto-snap discord to right [of monitor 2]" → `tiling.set_app_zone` (validates the zone resolves before saving); "stop auto-snapping firefox" → `tiling.clear_app_zone`; intents placed at the top of the tiling block (before snap patterns + apps-open). `apps.open_app()` calls `tiling.zone_rect_for_app(name)` when launched with no explicit rect and snaps there instead of centering. 5 dispatcher intents |
+| LLM fallback via Ollama | `commands/fallback.answer(text)` POSTs to a local Ollama server (`/api/generate`, stdlib `urllib` — no new dep) with a "one or two short spoken sentences" system prompt; wired at the very bottom of `dispatch()` after the fuzzy guess, before "Not recognized". Opt-in: `config.FALLBACK_LLM` (`"ollama"`/`"none"`, default none) + `OLLAMA_HOST`/`OLLAMA_MODEL` (all env-overridable). Any failure (server down, model missing, 20s timeout) returns None → plain not-recognized reply, never hangs |
+| Custom monitor naming + per-zone targeting | (1) **Naming** — "name monitor 2 primary display" / "label display 1 gaming" / "name the left monitor coding" saves a display-only label in `tiling_layouts.json` → `monitor_names` (keyed by stable saved monitor id when resolvable, else the spoken ref). `commands/window_manager.name_monitor`; two intents placed *before* Identify Monitors so the shared "label" verb routes to naming when a name tail is present, else falls through to identify. ponytail: name is saved + spoken back, not yet rendered live in the WM panel. (2) **Per-zone HUD targeting** — fixed `tiling._snap_panel` which ignored the monitor qualifier (always primary/first-match); it now resolves an explicit monitor and passes `monitor_id` to `_resolve_zone`. "move/snap hud to top-left of monitor 1" snaps the directory panel into that zone on that monitor (`dispatcher._snap_hud_zone_monitor` shim, intent before move_orb_corner/move_hud); bare "move hud to monitor 2" still relocates the orb, "move hud to top-left" still pins the orb corner |
+| Workspace presets | "save layout as work" snapshots every open window's {exe,title,x,y,w,h} into `tiling_layouts.json` → `workspaces` → name; "restore work layout" greedily re-matches each saved window to an open one (exe then closest title via `_best_open_window`) and moves it with `_snap_hwnd_to_rect` (no focus steal); "what layouts do I have" lists them. `commands/tiling.save_workspace`/`restore_workspace`/`list_workspaces` + 4 dispatcher intents placed above snap/open_app. Built on `tiling.enumerate_windows()` (used over `window_manager.enumerate_windows()` since it already carries exe basename) |
+| Focus & front essential programs | `core/essential.py` keeps a dynamic protected set in `settings.json` (`essential_programs`). `active()` matches the foreground window's exe basename/title against the list AND auto-protects any borderless/exclusive-fullscreen foreground app (reuses `window_ops.fullscreen_app_running`); `should_defer()` is the gate. Voice: "protect X" / "treat X as essential" / "this is my game" (no name → current foreground), "stop protecting X" / "that's not essential", "what's protected" → `commands/context.protect_program`/`unprotect_program`/`list_protected`, intents placed high so they beat snap/open_app. Gating: Discord nav + send-message (`commands/discord._deferred`) decline with a "X is protected" message instead of stealing focus via `with_window_focused`. App-launch/panel-open focus left ungated (panels already `showInactive`; launching is user-requested) — `ponytail:` extend if a game still loses focus on open |
 | License | AGPL-3.0 `LICENSE` present at repo root (was P0 #1) |
 | First-run setup + hardening | `setup.py` does the full one-command flow (Python check, pip, wake-word + Piper voice download, npm, mpv/Firefox checks, default config) and is idempotent. Hardened: `create_defaults` imports `core.features.DEFAULTS` (no drift); downloads go to `.part` temp + atomic rename; `check_firefox()` + shared `apps.find_firefox()` (PATH→registry→Program Files); search fallback degrades to default browser if Firefox absent; final core-import smoke test; seeds `discord_keys.json` from example; warns on Node < 18 |
 | Window Manager UI | Monitor cards, display picker, HUD pinning |

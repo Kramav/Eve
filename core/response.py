@@ -3,6 +3,15 @@ class Silent(str):
     pass
 
 
+class Panel(Silent):
+    """A panel-open/close/toggle action. The handler has already done the work
+    (opened/closed an Electron window) via the Display, so the dispatcher loop
+    should hide the HUD immediately and never speak the return string. Lets the
+    7 former pre-dispatch shortcuts in main.py live as normal INTENTS without
+    gaining a spoken confirmation or a 'Thinking…' delay."""
+    pass
+
+
 class VideoList:
     """A list of videos to show in the overlay panel. Not spoken unless user asks."""
 

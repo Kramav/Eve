@@ -22,7 +22,7 @@ import core.dispatcher as _dispatcher_mod
 from core.hot_reload import start as _start_hot_reload
 from core.speaker import Speaker
 from core.display import Display
-from core.response import Silent, VideoList, SiteList
+from core.response import Silent, Panel, VideoList, SiteList
 from core.session import get as _get_session, Mode as _Mode
 from core import features as _features
 from commands.reminders import start_checker
@@ -33,49 +33,6 @@ import commands.window_manager as _wm_cmd
 import commands.windows as _win_cmd
 import commands.programs as _prog_cmd
 import commands.context  as _ctx_cmd
-
-_OVERLAY_TOGGLE = re.compile(
-    # Full phrase: "show/hide/close the overlay / hud / log / history"
-    # \s+ tolerates non-breaking spaces; (?:\w+\s+){0,2}? swallows filler words
-    # Whisper inserts (e.g. "show an overlay", "show me the hud").
-    r"\b(?:show|open|hide|close|toggle)\s+(?:\w+\s+){0,2}?(?:overlay|hud|log|history)\b"
-    # Bare word or on/off suffix — Whisper often drops the leading verb
-    r"|^(?:overlay|hud)(?:\s+(?:on|off))?$",
-    re.I,
-)
-
-_MANAGE_APPS = re.compile(
-    r"\b(?:manage|open|show|edit|configure)\b.{0,20}\bapps?\b"
-    r"|\b(?:open|show|launch)\s+(?:the\s+)?app\s+manager\b",
-    re.I,
-)
-
-_MANAGE_WINDOWS = re.compile(
-    r"\b(?:open|show|launch)\s+(?:the\s+)?window\s*manager\b",
-    re.I,
-)
-
-_OPEN_DIRECTORY = re.compile(
-    r"\b(?:show|open|launch)\s+(?:the\s+)?(?:routing\s+)?directory\b",
-    re.I,
-)
-
-_CLOSE_DIRECTORY = re.compile(
-    r"\b(?:close|hide|dismiss)\s+(?:the\s+)?(?:routing\s+)?directory\b",
-    re.I,
-)
-
-_VOICE_SETTINGS = re.compile(
-    r"\b(?:open|show|launch)\s+(?:the\s+)?voice\s+(?:settings?|config(?:uration)?|options?|manager)\b"
-    r"|\bvoice\s+(?:settings?|manager)\b",
-    re.I,
-)
-
-_COMMAND_EDITOR = re.compile(
-    r"\b(?:open|show|edit|launch)\s+(?:the\s+)?command(?:s|\s+editor)\b",
-    re.I,
-)
-
 
 def main():
     print("Starting Eve...")
@@ -97,11 +54,17 @@ def main():
     _sys_cmd.set_display(display)
     _sys_cmd.set_speaker(speaker)
 
+    # Drop-in skills (skills/*.py) — third-party commands without editing core.
+    from core import skills
+    skills.load(display)
+
     listener.set_speaking_event(speaker.is_speaking)
 
     def on_reminder(message: str):
         display.show(status="Reminder", text=message, color="listening")
         display.log("system", f"Reminder: {message}")
+        from core import notify
+        notify.toast("Reminder", message)   # persists in Action Center; best-effort
         speaker.speak(f"Reminder: {message}")
         time.sleep(3)
         display.hide()
@@ -137,44 +100,15 @@ def main():
             display.update(text=f'"{text}"')
             display.log("heard", text)
 
-            if _OVERLAY_TOGGLE.search(text.lower()):
-                display.toggle_overlay()
-                delay = 0
-                return
-
-            if _OPEN_DIRECTORY.search(text):
-                display.show_directory()
-                delay = 0
-                return
-
-            if _CLOSE_DIRECTORY.search(text):
-                display.hide_directory()
-                delay = 0
-                return
-
-            if _MANAGE_APPS.search(text):
-                display.open_app_manager()
-                delay = 0
-                return
-
-            if _MANAGE_WINDOWS.search(text):
-                display.open_window_manager()
-                delay = 0
-                return
-
-            if _VOICE_SETTINGS.search(text):
-                display.open_voice_settings()
-                delay = 0
-                return
-
-            if _COMMAND_EDITOR.search(text):
-                from commands.system import open_editor
-                open_editor()
-                delay = 0
-                return
-
             response = _dispatcher_mod.dispatch(text)
             print(f"Eve: {response}")
+
+            # Panel actions (open/close/toggle a managed Electron window) are
+            # already done by the handler via the Display; hide the HUD fast and
+            # don't speak. Must be checked before Silent (Panel subclasses it).
+            if isinstance(response, Panel):
+                delay = 0
+                return
 
             if isinstance(response, Silent):
                 display.show(status=str(response), text="", color="error")

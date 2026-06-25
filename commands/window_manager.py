@@ -139,6 +139,34 @@ def move_hud(monitor_text: str) -> str:
     return f"Moved HUD to {label}."
 
 
+def name_monitor(monitor_text: str, label: str) -> str:
+    """Voice: 'name monitor 2 primary display' → save a display-only label for
+    that monitor in tiling_layouts.json. The label is for the user's reference
+    (spoken back, shown in the WM panel); it doesn't change routing."""
+    ref = _resolve_monitor_ref(monitor_text)
+    if ref is None:
+        return f"I couldn't tell which monitor you meant from '{monitor_text}'."
+    label = (label or '').strip().strip('"\'')
+    if not label:
+        return "What name should I give it?"
+
+    from commands.tiling import _load_layouts, _save_layouts, _resolve_monitor_by_ref
+    data     = _load_layouts()
+    monitors = data.get('monitors', {})
+    # Prefer keying by the stable saved monitor id so the name sticks to the
+    # physical display; fall back to the spoken ref if nothing matches.
+    mid, _ = _resolve_monitor_by_ref(ref, monitors)
+    key = mid if mid is not None else ref
+    data.setdefault('monitor_names', {})[key] = label
+    _save_layouts(data)
+
+    # ponytail: name is saved + spoken back; WM panel will show it on next read.
+    # Add a Python→Electron layouts-reload push if live UI refresh is wanted.
+    spoken = 'primary' if ref == 'primary' else (
+        f'the {ref} monitor' if ref in ('left', 'middle', 'right') else f'monitor {ref}')
+    return f"Named {spoken} '{label}'."
+
+
 _VERTICAL_ALIASES   = {'top': 'top', 'upper': 'top', 'bottom': 'bottom', 'lower': 'bottom'}
 _HORIZONTAL_ALIASES = {'left': 'left', 'right': 'right'}
 

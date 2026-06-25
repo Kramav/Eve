@@ -12,6 +12,16 @@ from commands import context as ctx_cmd
 def _send_to_discord(text, recipient):
     """Argument flip for the 'send X to Y on discord' pattern."""
     return discord_cmd.send_message(recipient, text)
+
+
+# Startup-on-login shims — lazily import the registry helper so importing the
+# dispatcher (e.g. in tests) never touches winreg unless the intent fires.
+def _autostart_enable():
+    from core import autostart; return autostart.enable()
+def _autostart_disable():
+    from core import autostart; return autostart.disable()
+def _autostart_status():
+    from core import autostart; return autostart.status_voice()
 import core.session as _sess_mod
 from core.session import Mode
 from core import features as _features
@@ -76,10 +86,20 @@ def _snap_monitor_zone(app, monitor, zone): return tiling.snap_app(app, zone, mo
 # "snap firefox to monitor 2" with no zone implies the implicit full zone —
 # every saved monitor exposes 'full' even when its preset is e.g. top-bottom.
 def _snap_monitor_only(app, monitor):       return tiling.snap_app(app, 'full', monitor)
+# "move hud to top-left of monitor 1" — snap the directory panel into a named
+# zone on a specific monitor (the 'move' verb otherwise just relocates the orb).
+def _snap_hud_zone_monitor(zone, monitor):  return tiling.snap_app('hud', zone, monitor)
 
 
 # (regex pattern, handler) — first match wins, captured groups passed as args
 INTENTS = [
+    # HUD / overlay toggle — consolidated from main.py's former _OVERLAY_TOGGLE
+    # pre-dispatch block (now deleted; dispatch() is the single router). MUST be
+    # above the directory show/hide intents so "show hud" / "hide hud" / bare
+    # "hud" all *toggle* the overlay as before, rather than show/hide it.
+    (r"\b(?:show|open|hide|close|toggle)\s+(?:\w+\s+){0,2}?(?:overlay|hud|log|history)\b"
+     r"|^(?:overlay|hud)(?:\s+(?:on|off))?$",                                                system.toggle_overlay),
+
     # Command editor
     (r"(?:open|edit|show|launch) (?:the )?(?:command editor|my commands|eve commands|commands)", system.open_editor),
     (r"(?:close|quit|exit|dismiss) (?:the )?(?:command editor|my commands|eve commands|commands)", system.close_editor),
@@ -94,6 +114,16 @@ INTENTS = [
     (r"\b(?:go\s+back|undo(?:\s+that)?|revert(?:\s+that)?)\b",                             ctx_cmd.undo),
     (r"\bclose\s+(?:that(?:\s+window)?|it|the\s+(?:last\s+)?window)\b",                    ctx_cmd.close_last),
     (r"\bcancel\s+(?:that|it|the\s+last\s+(?:one|thing))\b",                               ctx_cmd.cancel_last),
+
+    # Protected / essential programs — beat snap/open_app so "protect X" /
+    # "stop protecting X" aren't read as app or z-order commands.
+    (r"\bstop\s+protecting\s+(.+)$",                                                       ctx_cmd.unprotect_program),
+    (r"\b(?:that|this|it)(?:'?s)?\s+(?:is\s+)?(?:not|no\s+longer)\s+(?:essential|protected|my\s+game)\b", ctx_cmd.unprotect_program),
+    (r"\b(?:treat|mark|set)\s+(.+?)\s+as\s+(?:essential|protected|my\s+game)\b",           ctx_cmd.protect_program),
+    (r"\bprotect\s+(.+)$",                                                                 ctx_cmd.protect_program),
+    (r"\bthis\s+is\s+my\s+game\b",                                                         ctx_cmd.protect_program),
+    (r"\bdon'?t\s+(?:steal\s+focus|interrupt)\b",                                          ctx_cmd.protect_program),
+    (r"\bwhat(?:'?s| is| are\s+you)\s+protect(?:ed|ing)\b",                                ctx_cmd.list_protected),
 
     # Memory panel + memory writes — high priority to beat snap/open_app
     (r"(?:open|show)\s+(?:the\s+)?(?:memory|memories|brain)",                              ctx_cmd.open_memory_panel),
@@ -133,10 +163,25 @@ INTENTS = [
     # "show zones" don't get swallowed by the monitors regex below.
     (r"\b(?:identify|show|reveal|display)\s+(?:\w+\s+){0,2}?(?:zones?|segments?|tiles?|tiling(?:\s+layouts?)?|layouts?)\b",  system.identify_zones),
 
+    # Name a monitor — display-only label saved in tiling_layouts.json.
+    # MUST come before Identify Monitors so "name/label monitor 2 gaming" (which
+    # has a name tail) isn't swallowed by the identify pattern's shared verbs.
+    (r"(?:name|label|call)\s+(?:the\s+)?(?:monitor|display|screen)\s+(\S+)\s+(?:as\s+)?(.+)$",  wm.name_monitor),
+    (r"(?:name|label|call)\s+(?:the\s+)?(primary|leftmost|rightmost|left|middle|center|right)\s+"
+     r"(?:monitor|display|screen)\s+(?:as\s+)?(.+)$",                                            wm.name_monitor),
+
     # Identify Monitors — flash a numbered card on each monitor.
     # (?:\w+\s+){0,2}? tolerates filler like "show me monitor numbers" / "label all displays"
     (r"\b(?:identify|show|label|number)\s+(?:\w+\s+){0,2}?(?:monitors?|displays?|screens?)\b",  system.identify_monitors),
     (r"which\s+monitor\s+is\s+which",                                                            system.identify_monitors),
+
+    # ── Workspace presets — save/restore all window positions by name ─────
+    # Before snap/open_app so "save layout as work" / "restore work layout"
+    # aren't read as app or snap commands.
+    (r"\bsave\s+(?:this\s+)?(?:layout|workspace|window\s+layout)\s+(?:as\s+)?(.+)$",       tiling.save_workspace),
+    (r"\b(?:restore|load|apply)\s+(?:the\s+)?(.+?)\s+(?:layout|workspace)$",               tiling.restore_workspace),
+    (r"\b(?:restore|load|apply)\s+(?:layout|workspace)\s+(.+)$",                           tiling.restore_workspace),
+    (r"\b(?:what|which|list)\s+(?:layouts?|workspaces?)(?:\s+do\s+i\s+have)?\b",            tiling.list_workspaces),
 
     # ── Voice WM mutation ─────────────────────────────────────────────────
     # "set monitor 1 to 2x2 grid", "make monitor two top and bottom",
@@ -144,6 +189,13 @@ INTENTS = [
     (r"(?:set|make|change|configure)\s+(?:the\s+)?(?:monitor|display|screen)\s+(\S+)\s+(?:(?:to|into|as)\s+)?(.+)",  wm.set_monitor_layout),
     # "monitor 2 grid" / "display three full" (no verb form)
     (r"^(?:monitor|display|screen)\s+(\S+)\s+(.+)$",                                                                 wm.set_monitor_layout),
+
+    # "move HUD to top-left of monitor 1" — snap the directory panel into a
+    # named zone on a specific monitor. MUST come before move_orb_corner /
+    # move_hud, which would otherwise eat it and ignore the zone.
+    (r"(?:move|set|pin|put|send|snap)\s+(?:the\s+)?(?:hud|orb|overlay|directory)\s+"
+     r"(?:to|in|on|at|into|onto)\s+(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?\s+"
+     r"(?:on|of)\s+(?:the\s+)?(.+)$",                                                            _snap_hud_zone_monitor),
 
     # "move hud to monitor 2", "set hud to primary", "pin hud to display 1"
     # Move orb to a screen corner — MUST come before the bare move_hud pattern
@@ -160,15 +212,20 @@ INTENTS = [
     (r"(?:close|hide|dismiss|quit|exit)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud)", system.hide_directory),
 
     # Voice Settings — before the generic open/launch app intent so it isn't
-    # misrouted to open_app (matches main.py's pre-dispatch _VOICE_SETTINGS).
-    (r"(?:open|show|launch) (?:the )?voice (?:settings?|manager|config(?:uration)?)", system.open_voice_settings),
+    # misrouted to open_app. Includes the bare "voice settings" / "voice manager"
+    # form that main.py's former pre-dispatch _VOICE_SETTINGS block handled.
+    (r"(?:open|show|launch) (?:the )?voice (?:settings?|manager|config(?:uration)?|options?)"
+     r"|\bvoice\s+(?:settings?|manager)\b",                                              system.open_voice_settings),
 
     # API Keys / Integrations
     (r"(?:open|show|edit) (?:the )?(?:api keys?|integrations?|settings)",  system.open_integrations),
     (r"(?:close|quit|exit|dismiss) (?:the )?(?:api keys?|integrations?)",   system.close_integrations),
 
-    # App Manager
-    (r"(?:open|show|launch) (?:the )?app manager",             system.open_app_manager),
+    # App Manager — the broad "manage/edit/configure … apps" + "open apps" form
+    # comes from main.py's former pre-dispatch _MANAGE_APPS block. Must stay above
+    # apps.open_app so "open apps" opens the manager, not an app named "apps".
+    (r"\b(?:manage|open|show|edit|configure)\b.{0,20}\bapps?\b"
+     r"|\b(?:open|show|launch)\s+(?:the\s+)?app\s+manager\b",   system.open_app_manager),
     (r"(?:close|quit|exit|dismiss) (?:the )?app manager",      system.close_app_manager),
     (r"kill (?:the )?app manager",                             system.close_app_manager),
 
@@ -186,6 +243,17 @@ INTENTS = [
     (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",             youtube.play_or_search),
     # \b prevents matching "play" inside "display", "watch" inside "watchful", etc.
     (r"\b(?:play|watch)\s+(.+)",                                  youtube.play_or_search),
+
+    # Auto-snap on launch — persist a default zone for an app. MUST come before
+    # the snap patterns (so "auto snap discord to right" assigns rather than
+    # snapping now) and before the Apps open intent (so "always open firefox in
+    # top-left" isn't read as opening an app named "firefox in top-left").
+    (r"\bstop\s+auto[-\s]?snapping\s+(.+)$",                                              tiling.clear_app_zone),
+    (r"\b(?:always|automatically)\s+(?:open|launch|put|snap)\s+(.+?)\s+(?:in|to|at)\s+"
+     r"(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?\s+(?:on|of)\s+(.+)$",             tiling.set_app_zone),
+    (r"\b(?:always|automatically)\s+(?:open|launch|put|snap)\s+(.+?)\s+(?:in|to|at)\s+"
+     r"(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$",                                tiling.set_app_zone),
+    (r"\bauto[-\s]?snap\s+(.+?)\s+(?:in|to|at)\s+(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$",  tiling.set_app_zone),
 
     # Tiling — before generic apps patterns so "snap/move X to Y" doesn't route to open_app.
     # Explicit-monitor variants come FIRST so the monitor qualifier isn't swallowed by the
@@ -247,8 +315,19 @@ INTENTS = [
     # Bare snap — snap/move/send tolerate missing "to"; bring/put REQUIRE "to" so
     # "bring up firefox" still routes to open_app and doesn't get misread as
     # snap_app("up","firefox").
-    (r"(?:snap|move|send)\s+(.+?)\s+(?:to\s+)?(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$", tiling.snap_app),
-    (r"(?:bring|put)\s+(.+?)\s+to\s+(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$",           tiling.snap_app),
+    (r"\b(?:snap|move|send)\s+(.+?)\s+(?:to\s+)?(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$", tiling.snap_app),
+    (r"\b(?:bring|put)\s+(.+?)\s+to\s+(?:the\s+)?([\w-]+)(?:\s+(?:zone|half|section))?$",           tiling.snap_app),
+
+    # Startup on login — register/unregister Eve in the HKCU Run key. MUST come
+    # before the Apps open intent (verbs include "start"/"run") so "start eve on
+    # login" isn't read as opening an app called "eve on login".
+    # Disable patterns FIRST — "don't start eve at login" contains "start eve at
+    # login", which the enable pattern would otherwise grab.
+    (r"(?:don'?t|do not|stop|disable)\s+(?:starting|start|launch(?:ing)?|run(?:ning)?)\s+(?:eve\s+)?(?:on|at|when\s+i)?\s*(?:log\s*in|login|startup|boot|start\s*up)",  _autostart_disable),
+    (r"\b(?:remove|disable)\s+(?:eve\s+)?(?:from\s+)?(?:windows\s+)?startup\b",                  _autostart_disable),
+    (r"(?:start|launch|run|open)\s+(?:eve\s+)?(?:on|at|when\s+i)\s+(?:log\s*in|login|startup|boot|start\s*up)",  _autostart_enable),
+    (r"\b(?:add|enable)\s+(?:eve\s+)?(?:to\s+)?(?:windows\s+)?startup\b",                       _autostart_enable),
+    (r"\b(?:do you|will you|are you set to)\s+start\s+(?:on|at)\s+(?:log\s*in|login|startup)\b", _autostart_status),
 
     # Timer creation — MUST come before the Apps open intent, whose verb list
     # includes "start"/"run", so "start a 10 minute timer" isn't read as
@@ -355,7 +434,7 @@ _HANDLER_FEATURE = {
     tiling.snap_app:            'tiling',
 }
 
-_WAKE_PREFIXES = ("hey jarvis", "hey eve", "jarvis", "eve")
+from config import WAKE_PREFIXES as _WAKE_PREFIXES
 
 _ORDINALS = {
     "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
@@ -775,9 +854,23 @@ def dispatch(text: str):
             groups = m.groups()
             return handler(*groups) if groups else handler()
 
+    # Drop-in skills (skills/*.py) — extend the built-ins without editing core.
+    # Tried after built-ins so they add commands rather than override them.
+    from core import skills
+    skill_result = skills.dispatch(text)
+    if skill_result is not None:
+        return skill_result
+
     # Fuzzy guess — handle speech-recognition mishears before giving up
     guess = _guess_dispatch(text)
     if guess is not None:
         return guess
+
+    # Local LLM fallback (opt-in via config.FALLBACK_LLM = "ollama"). Returns
+    # None when off/unavailable, so we fall through to the plain reply.
+    from commands import fallback
+    llm = fallback.answer(text)
+    if llm is not None:
+        return llm
 
     return "Not recognized. Say 'help' to hear available commands."

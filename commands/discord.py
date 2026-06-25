@@ -73,7 +73,20 @@ def disconnect() -> str:
 
 # ── Navigation — focus Discord briefly, restore previous foreground ───────
 
+def _deferred() -> str | None:
+    """If a protected program is active, return a decline message (these paths
+    steal focus); else None to proceed."""
+    from core import essential
+    act = essential.active()
+    if act:
+        return f"Not switching to Discord — {act} is protected. Say 'stop protecting {act}' first."
+    return None
+
+
 def _focused_press(shortcut_key: str, success_msg: str) -> str:
+    deferred = _deferred()
+    if deferred:
+        return deferred
     hwnd = _discord_hwnd()
     if not hwnd:
         return "Discord isn't open."
@@ -94,6 +107,9 @@ def quick_switcher() -> str:  return _focused_press('quick_switch', 'Opened Disc
 # ── Send message — focus Discord, open quick switcher, find, type, send ──
 
 def send_message(recipient: str, text: str) -> str:
+    deferred = _deferred()
+    if deferred:
+        return deferred
     hwnd = _discord_hwnd()
     if not hwnd:
         return "Discord isn't open."

@@ -83,6 +83,15 @@ def open_app(name: str, snap_rect: tuple | None = None) -> str:
     if not cmd:
         return Silent(f"Unknown app: {name}")
 
+    # Auto-snap on launch: if no explicit rect was passed but this app has a
+    # saved zone assignment, place it there instead of centering on a monitor.
+    if snap_rect is None:
+        try:
+            from commands import tiling
+            snap_rect = tiling.zone_rect_for_app(name)
+        except Exception:
+            snap_rect = None
+
     cmd = _resolve_exe(cmd)
     try:
         from core import monitor

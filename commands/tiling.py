@@ -543,16 +543,31 @@ def _resolve_panel(app_name: str) -> str | None:
     return None
 
 
-def _snap_panel(panel_id: str, app_name: str, zone_name: str) -> str:
-    mon, zone = _resolve_zone(zone_name, hwnd=None)
+def _snap_panel(panel_id: str, app_name: str, zone_name: str,
+                monitor_ref: str | None = None) -> str:
+    # Resolve an explicit monitor qualifier ("monitor 2" / "primary" / "left")
+    # so "snap hud to top-left of monitor 2" targets that specific display,
+    # instead of falling back to primary/first-match like the bare form.
+    monitor_id = None
+    if monitor_ref:
+        from commands.window_manager import _resolve_monitor_ref
+        norm = _resolve_monitor_ref(monitor_ref)
+        monitors = _load_layouts().get('monitors', {})
+        monitor_id, _ = _resolve_monitor_by_ref(norm, monitors)
+        if monitor_id is None:
+            return f"I couldn't find {monitor_ref!r}."
+
+    mon, zone = _resolve_zone(zone_name, hwnd=None, monitor_id=monitor_id)
     if zone is None:
-        return f"No zone named '{zone_name}' in any saved layout."
+        where = f" on {monitor_ref}" if monitor_ref else ""
+        return f"No zone named '{zone_name}'{where} in any saved layout."
     # Electron's setBounds uses DIPs, not physical pixels.
     x, y, w, h = _zone_pixel_rect(mon, zone, physical=False)
     if _display is None:
         return f"Display not ready — can't snap {app_name}."
     _display.snap_panel(panel_id, x, y, w, h)
-    return f"Snapped {app_name} to {zone_name}"
+    where = f" on {monitor_ref}" if monitor_ref else ""
+    return f"Snapped {app_name} to {zone_name}{where}"
 
 
 def snap_app(app_name: str, zone_name: str, monitor_ref: str | None = None) -> str:
@@ -569,7 +584,7 @@ def snap_app(app_name: str, zone_name: str, monitor_ref: str | None = None) -> s
     # 1. Eve UI panel? (routing directory, window manager, app manager, voice settings)
     panel_id = _resolve_panel(app_name)
     if panel_id is not None:
-        return _snap_panel(panel_id, app_name, zone_name)
+        return _snap_panel(panel_id, app_name, zone_name, monitor_ref)
 
     # 2. Resolve explicit monitor qualifier ("monitor two", "primary", etc.)
     monitor_id = None
@@ -679,3 +694,165 @@ def _describe_target(zone_name: str, monitor_ref: str | None) -> str:
     if zone_name == 'full':
         return 'full screen'
     return zone_name
+
+
+# ── Workspace presets — save/restore all window positions by name ──────────
+# Stored in tiling_layouts.json under "workspaces": {name: [ {exe,title,x,y,w,h}, ... ]}
+
+def _save_layouts(data: dict) -> None:
+    _LAYOUTS_FILE.write_text(json.dumps(data, indent=2))
+
+
+def save_workspace(name: str) -> str:
+    """Voice: 'save layout as work'. Snapshots every open window's position."""
+    name = (name or '').strip().lower()
+    if not name:
+        return "What should I name this layout?"
+    wins = [
+        {'exe': w['exe'], 'title': w['title'],
+         'x': w['x'], 'y': w['y'], 'w': w['w'], 'h': w['h']}
+        for w in enumerate_windows()
+    ]
+    if not wins:
+        return "No windows to save."
+    data = _load_layouts()
+    data.setdefault('workspaces', {})[name] = wins
+    _save_layouts(data)
+    return f"Saved {len(wins)} windows as '{name}'."
+
+
+def restore_workspace(name: str) -> str:
+    """Voice: 'restore work layout'. Greedily matches each saved window to an
+    open one (by exe, then closest title) and moves it back."""
+    name = (name or '').strip().lower()
+    saved = _load_layouts().get('workspaces', {}).get(name)
+    if not saved:
+        return f"No layout named '{name}'."
+
+    open_wins = enumerate_windows()
+    used = set()
+    moved = 0
+    for entry in saved:
+        match = _best_open_window(entry, open_wins, used)
+        if match is None:
+            continue
+        used.add(match['hwnd'])
+        if _snap_hwnd_to_rect(match['hwnd'], entry['x'], entry['y'],
+                              entry['w'], entry['h']):
+            moved += 1
+    if moved == 0:
+        return f"Restored '{name}' but none of those windows are open."
+    return f"Restored '{name}' — moved {moved} window{'s' if moved != 1 else ''}."
+
+
+def _best_open_window(entry: dict, open_wins: list, used: set) -> dict | None:
+    """Pick the unused open window that best matches a saved entry: same exe
+    first, then the closest title; falls back to title-only match."""
+    exe   = (entry.get('exe') or '').lower()
+    title = (entry.get('title') or '').lower()
+    best  = None
+    for w in open_wins:
+        if w['hwnd'] in used:
+            continue
+        score = 0
+        if exe and w['exe'].lower() == exe:
+            score += 50
+            if w['title'].lower() == title:
+                score += 50
+            elif title and (title in w['title'].lower() or w['title'].lower() in title):
+                score += 25
+        elif title and w['title'].lower() == title:
+            score += 40
+        if score and (best is None or score > best[0]):
+            best = (score, w)
+    return best[1] if best else None
+
+
+def list_workspaces() -> str:
+    """Voice: 'what layouts do I have'."""
+    names = list(_load_layouts().get('workspaces', {}).keys())
+    if not names:
+        return "You haven't saved any layouts yet."
+    return "Saved layouts: " + ", ".join(names) + "."
+
+
+# ── Auto-snap on launch — per-app zone assignment ──────────────────────────
+# Stored in tiling_layouts.json under "app_zones": {appname: {zone, monitor}}.
+# apps.open_app() consults zone_rect_for_app() when launched with no explicit
+# snap, so a saved app lands in its zone instead of centered on a monitor.
+
+def set_app_zone(app_name: str, zone_name: str, monitor_ref: str | None = None) -> str:
+    """Voice: 'always open firefox in top-left' / 'auto-snap discord to right'."""
+    app_name  = (app_name or '').strip().lower()
+    zone_name = (zone_name or '').strip().lower()
+    if not app_name or not zone_name:
+        return "Tell me an app and a zone, like 'always open firefox in top-left'."
+    # Validate the zone resolves now so we don't save a dead assignment.
+    monitor_id = _resolve_monitor_id(monitor_ref)
+    if monitor_ref and monitor_id is None:
+        return f"I couldn't find {monitor_ref!r}."
+    mon, zone = _resolve_zone(zone_name, hwnd=None, monitor_id=monitor_id)
+    if zone is None:
+        return f"No zone named '{zone_name}' in any saved layout."
+    data = _load_layouts()
+    entry = {'zone': zone_name}
+    if monitor_ref:
+        entry['monitor'] = monitor_ref
+    data.setdefault('app_zones', {})[app_name] = entry
+    _save_layouts(data)
+    where = f" on {monitor_ref}" if monitor_ref else ""
+    return f"I'll open {app_name} in the {zone_name} zone{where} from now on."
+
+
+def clear_app_zone(app_name: str) -> str:
+    """Voice: 'stop auto-snapping firefox' / 'forget firefox's zone'."""
+    app_name = (app_name or '').strip().lower()
+    data = _load_layouts()
+    zones = data.get('app_zones', {})
+    if app_name not in zones:
+        return f"{app_name} doesn't have a saved zone."
+    del zones[app_name]
+    _save_layouts(data)
+    return f"Stopped auto-snapping {app_name}."
+
+
+def _resolve_monitor_id(monitor_ref: str | None) -> str | None:
+    """Spoken monitor ref → saved monitor id, or None."""
+    if not monitor_ref:
+        return None
+    from commands.window_manager import _resolve_monitor_ref
+    norm = _resolve_monitor_ref(monitor_ref)
+    monitors = _load_layouts().get('monitors', {})
+    mid, _ = _resolve_monitor_by_ref(norm, monitors)
+    return mid
+
+
+def zone_rect_for_app(app_name: str) -> tuple | None:
+    """Physical-pixel (x, y, w, h) for an app's saved zone, or None if unset /
+    unresolvable. Called by apps.open_app() to auto-snap on launch."""
+    entry = _load_layouts().get('app_zones', {}).get((app_name or '').strip().lower())
+    if not entry:
+        return None
+    monitor_id = _resolve_monitor_id(entry.get('monitor'))
+    mon, zone = _resolve_zone(entry['zone'], hwnd=None, monitor_id=monitor_id)
+    if zone is None:
+        return None
+    return _zone_pixel_rect(mon, zone, physical=True)
+
+
+if __name__ == '__main__':
+    # ponytail: matching logic self-check — no Win32 calls
+    opens = [
+        {'hwnd': 1, 'exe': 'chrome.exe', 'title': 'GitHub - Chrome'},
+        {'hwnd': 2, 'exe': 'chrome.exe', 'title': 'Gmail - Chrome'},
+        {'hwnd': 3, 'exe': 'code.exe',   'title': 'tiling.py - VS Code'},
+    ]
+    used: set = set()
+    m = _best_open_window({'exe': 'chrome.exe', 'title': 'Gmail - Chrome'}, opens, used)
+    assert m['hwnd'] == 2, m                      # exact title wins over sibling
+    used.add(2)
+    m = _best_open_window({'exe': 'chrome.exe', 'title': 'GitHub - Chrome'}, opens, used)
+    assert m['hwnd'] == 1, m                      # used one is skipped
+    m = _best_open_window({'exe': 'gone.exe', 'title': 'nope'}, opens, used)
+    assert m is None, m                           # no match → None, not a wrong window
+    print('ok')

@@ -85,11 +85,21 @@ def _compute_status() -> dict:
     # browser does not, so 'youtube' stays available regardless.
     status['mpv_youtube'] = 'ok' if shutil.which('mpv') else 'unavailable'
 
-    # TTS: requires the .onnx voice model file
+    # TTS: needs a usable engine. Kokoro (if selected) needs its model files;
+    # otherwise Piper needs its .onnx voice. "auto" is ok if either is present.
     try:
-        from config import TTS_DEFAULT_VOICE, TTS_VOICES_DIR
-        onnx = Path(TTS_VOICES_DIR) / f'{TTS_DEFAULT_VOICE}.onnx'
-        status['tts'] = 'ok' if onnx.exists() else 'unavailable'
+        from config import (TTS_ENGINE, TTS_DEFAULT_VOICE, TTS_VOICES_DIR,
+                            TTS_KOKORO_MODEL, TTS_KOKORO_VOICES)
+        engine = (TTS_ENGINE or 'piper').lower()
+        piper_ok  = (Path(TTS_VOICES_DIR) / f'{TTS_DEFAULT_VOICE}.onnx').exists()
+        kokoro_ok = Path(TTS_KOKORO_MODEL).exists() and Path(TTS_KOKORO_VOICES).exists()
+        if engine == 'kokoro':
+            ok = kokoro_ok or piper_ok        # kokoro engine falls back to piper
+        elif engine == 'auto':
+            ok = kokoro_ok or piper_ok
+        else:
+            ok = piper_ok
+        status['tts'] = 'ok' if ok else 'unavailable'
     except Exception:
         status['tts'] = 'unavailable'
 
