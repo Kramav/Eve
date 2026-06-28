@@ -1,6 +1,6 @@
 {
   "tts": true,
-  "youtube": true,
+  "youtube": false,
   "web_search": true,
   "reminders": true,
   "apps": true,
