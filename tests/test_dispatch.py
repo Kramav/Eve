@@ -17,8 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import dispatcher as d
 from core import features, session as S
 from commands import (apps, search, system, youtube, windows as windows_cmd,
-                      tiling, context as ctx_cmd, window_manager as wm,
-                      handsfree as handsfree_cmd)
+                      tiling, context as ctx_cmd, window_manager as wm)
 
 
 def route(text: str):
@@ -416,21 +415,13 @@ def test_printer_cancel_requires_confirmation():
         S.get().pending_confirm = None
 
 
-# ── Hands-free mouse mode + interface synonym ────────────────────────────────
+# ── Interface synonym (hands-free now lives in skills/visual_nav.py) ──────────
 
-def test_handsfree_and_interface():
-    assert route("enter hands free mode") is handsfree_cmd.enter
-    assert route("hands-free mode") is handsfree_cmd.enter
-    assert route("mouse mode") is handsfree_cmd.enter
+def test_interface_synonym():
     # "interface" is a spoken synonym for the HUD/overlay (toggles, same as
     # "show hud"/"hide hud" — the toggle intent sits above directory show/hide).
     assert route("hide interface") is system.toggle_overlay
     assert route("show interface") is system.toggle_overlay
-    # In HANDSFREE mode, movement/click route to the mode handler; unrelated
-    # phrases decline so normal commands still work.
-    assert handsfree_cmd._parse("move right")[0] == "move"
-    assert handsfree_cmd._parse("click")[0] == "click"
-    assert handsfree_cmd._parse("open firefox") is None
 
 
 def test_snap_dangling_zone_prompts():

@@ -7,7 +7,6 @@ from commands import windows as windows_cmd
 from commands import programs as programs_cmd
 from commands import discord as discord_cmd
 from commands import context as ctx_cmd
-from commands import handsfree as handsfree_cmd
 
 
 def _send_to_discord(text, recipient):
@@ -100,13 +99,6 @@ INTENTS = [
     # "hud" all *toggle* the overlay as before, rather than show/hide it.
     (r"\b(?:show|open|hide|close|toggle)\s+(?:\w+\s+){0,2}?(?:overlay|hud|interface|log|history)\b"
      r"|^(?:overlay|hud|interface)(?:\s+(?:on|off))?$",                                      system.toggle_overlay),
-
-    # Hands-free mouse control — "enter hands free mode" / "mouse mode". MUST be
-    # high (before apps.open_app, whose verbs include 'start'/'open') so it isn't
-    # read as launching an app. Exit phrases are handled by the mode handler.
-    (r"\b(?:enter|start|activate|begin|go)\s+(?:into\s+)?hands?[-\s]?free(?:\s+mode)?\b"
-     r"|\bhands?[-\s]?free\s+mode\b|\bmouse\s+(?:mode|control)\b"
-     r"|\bcontrol\s+(?:the\s+)?mouse\b",                                                     handsfree_cmd.enter),
 
     # Command editor
     (r"(?:open|edit|show|launch) (?:the )?(?:command editor|my commands|eve commands|commands)", system.open_editor),
@@ -854,12 +846,6 @@ def dispatch(text: str):
             return result
     elif sess.mode == Mode.BROWSING and _features.get('youtube'):
         result = _dispatch_browsing(text)
-        if result is not None:
-            return result
-    elif sess.mode == Mode.HANDSFREE:
-        # Mouse-control mode: claim movement/click/scroll/exit; decline the rest
-        # so normal commands ("open firefox", "scroll down") still route.
-        result = handsfree_cmd.handle(text)
         if result is not None:
             return result
 

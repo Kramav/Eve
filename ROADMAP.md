@@ -47,6 +47,52 @@ Recent features (focus-essential, workspace presets, monitor naming, Ollama fall
   two Kokoro model files in `models/kokoro/`. **Remaining (user step):** `pip install kokoro-onnx`
   + download the model files, then pick a voice. No code left.
 
+### Visual Navigation skill — *Phase 1 done; Phase 2 mostly done (2d ONNX detector pending)*
+Hands-free mouse control was refactored out of core into an optional, feature-gated drop-in skill
+([skills/visual_nav.py](skills/visual_nav.py), `visual_nav` flag, default off, Alpha group). It grew
+from "nudge the mouse" into voice-driven element navigation: enumerate the interactive elements of
+the focused window and pick them by number ("what can I click" → "open number 2"). Cheapest-method
+priority order, **no continuous computer vision**.
+
+Provider-based, planner-selected:
+- **`AccessibilityProvider`** *(Phase 1, done)* — Windows UI Automation control tree of the
+  foreground window (Hyperlink/Button/ListItem/TabItem/…), via the new `uiautomation` dep. Lazy +
+  guarded; feature shows "unavailable — pip install uiautomation" when absent.
+- **`InputController`** *(Phase 1, done)* — native pyautogui move/click/double/right/scroll + key_ops
+  type/hotkey (absorbed the old `commands/handsfree.py` mouse logic).
+- **`NavigationPlanner`** *(Phase 1, done)* — accessibility → vision fallback; numbers elements,
+  drives the cursor to a chosen one. Light cache keyed by foreground (hwnd, title).
+- **Modal capture** *(Phase 1, done)* — via the existing Converse layer (no `Mode.HANDSFREE` hook in
+  core), so the skill is fully decoupled. Declines fall through so normal commands still work mid-mode.
+- **`VisionProvider`** *(Phase 2, done)* — a **cascade of backends** in [commands/vision.py](commands/vision.py),
+  tried cheapest-first via `config.VISION_BACKENDS` (default `["rapidocr"]`). On-demand screenshot only,
+  **no continuous CV**; result cached by an 8×8 perceptual hash so an unchanged screen isn't re-scanned.
+  Backends: **`OcrBackend`** (RapidOCR, CPU, no GPU/key — the low-end default) · **`CloudVisionBackend`**
+  (Claude `claude-haiku-4-5` / GPT `gpt-4o-mini` via stdlib urllib, set-of-marks-friendly, off-machine
+  compute for weak hardware) · **`OllamaVisionBackend`** (local `moondream`/llava, needs a GPU) ·
+  **`OnnxUiBackend`** *(2d, dormant — `available()=False` until a detector model is dropped at
+  `models/ui_detector.onnx`)*. Cloud/Ollama add **no dependency** (urllib).
+- **Select-by-description** *(Phase 2, done)* — "open the tutorial video" fuzzy-matches the spoken phrase
+  to an element label via `rapidfuzz` (cutoff 70); declines on no match so "open firefox" still launches.
+- **Numbered coordinate overlay** *(Phase 2, done)* — "what can I click" tags each element on screen,
+  reusing `display.identify_windows` (generic `{index,label,x,y,w,h}` payload).
+- **Cloud-key UI** *(Phase 2b, done)* — the API-Keys panel ([ui/src/integrations](ui/src/integrations))
+  is now **data-driven** (one card per service from a `SERVICES` list); Anthropic + OpenAI keys added.
+  `core/display._test_api_key` routes `integrations:test_<service>` to `vision.test_key` (minimal
+  `max_tokens:1` auth ping). Keys resolve via `vision.vision_key()` (settings.json → env), masked in the UI.
+- **`BrowserProvider`** *(Phase 2, deferred)* — documented provider slot; no automation dep today.
+- **Phase 2 remaining** — `OnnxUiBackend` model + setup download (2d); drag-and-drop; set-of-marks
+  prompt mode for cloud/ollama to harden click accuracy on coordinate hallucination.
+
+Tests: [tests/test_visual_nav.py](tests/test_visual_nav.py) (parser/planner/handler/select-by-desc) +
+[tests/test_vision.py](tests/test_vision.py) (cascade order, key resolution, JSON parse + scaling,
+phash, key-tester) — all against fakes, no UIA/OCR/network/mouse. **Known minor gap:** "start/launch
+hands free mode" routes to app-launch (skill intents run after `apps.open_app`); "hands free mode" /
+"mouse mode" / "enter hands-free mode" work. **Remaining (user steps):** `pip install uiautomation`
+(accessibility tier) and optionally `pip install rapidocr-onnxruntime` (OCR vision tier, no GPU); enable
+"Hands-free Visual Navigation" in the App Manager. Cloud vision: add an Anthropic/OpenAI key in the
+API-Keys panel and set `EVE_VISION_BACKENDS=rapidocr,claude` (or `gpt`/`ollama`).
+
 ---
 
 ## P2 — Medium Priority
@@ -101,6 +147,8 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 
 | Feature | Notes |
 |---------|-------|
+| Visual Navigation Phase 2 — vision cascade | [commands/vision.py](commands/vision.py): VisionProvider is a cheapest-first cascade (OCR/RapidOCR → ONNX-stub → cloud Claude/GPT → Ollama) over one on-demand screenshot, phash-cached. Adds select-by-description (rapidfuzz), numbered coordinate overlay (reuses `identify_windows`), and a data-driven API-Keys panel with Anthropic/OpenAI keys (`vision.test_key` auth ping). Cloud/Ollama need no new dep (urllib). Default backend OCR-only — no GPU. Tests: [tests/test_vision.py](tests/test_vision.py). 2d ONNX detector still pending |
+| Hands-free → Visual Navigation skill (P1, Phase 1) | Moved hands-free mouse control out of core (`commands/handsfree.py` + `Mode.HANDSFREE` + dispatcher hooks all deleted) into optional gated skill [skills/visual_nav.py](skills/visual_nav.py). Adds UIA accessibility tier (`uiautomation`) + numbered element selection ("open number 2") + native input + planner + VisionProvider stub. Modal capture via the Converse layer (no core hook). See the P1 "Visual Navigation skill" entry |
 | Off-switches for auto-behaviors | Added `notifications` + `game_protection` feature flags ([core/features.py](core/features.py) DEFAULTS+LABELS → auto-render as App Manager toggles). `notifications` off → reminders skip the Windows toast (gated in main.py `on_reminder`); `game_protection` off → `essential.active()` returns None so fullscreen auto-detect + protect-list stop deferring focus. Both default on |
 | STT speed+accuracy | `WHISPER_MODEL="auto"` ([config.py](config.py)) → `transcriber._resolve_model()` picks `distil-large-v3` on GPU / `distil-small.en` on CPU (both faster *and* more accurate than the old `small.en`). transcribe() tuned for short commands: `condition_on_previous_text=False` (no cross-command hallucination), `temperature=0.0` (deterministic, fastest decode), VAD filter. Pairs with the GPU device option |
 | Kokoro TTS engine | `core/speaker.py` refactored to a small engine interface (`synth`/`set_params`/`voice_id`); `TTS_ENGINE=piper`(default)/`kokoro`/`auto`. `_KokoroEngine` uses `kokoro-onnx` (no torch) + models in `models/kokoro/`; `_make_engine()` falls back to Piper if Kokoro is requested but unavailable, so TTS never dies. `list_voices()` + `features._compute_status` are engine-aware. Answers the P1 "change TTS tone" item — far more natural than Piper lessac. User step: `pip install kokoro-onnx` + download `kokoro-v1.0.onnx`/`voices-v1.0.bin` |

@@ -14,6 +14,19 @@ piper-tts
 # ── System control (volume, media keys, screenshots) ─────────────────────────
 pyautogui>=0.9.54
 
+# ── Visual Navigation skill (optional) — UI Automation accessibility tier ─────
+# Only needed for the 'visual_nav' feature (hands-free element navigation).
+# Windows-only; pulls comtypes. Skill degrades gracefully if absent.
+uiautomation>=2.0.18
+# Optional vision fallback for visual_nav (apps with no accessibility info).
+# The OCR tier is the no-GPU default; cloud/Ollama tiers need no extra dep
+# (stdlib urllib). Install only if you want the OCR / ONNX-detector tiers:
+#   pip install rapidocr-onnxruntime   # OCR text boxes on CPU (no GPU)
+#   pip install onnxruntime            # ONNX UI-element detector (Phase 2d)
+
+# ── Fuzzy matching (intent catalog + visual-nav element selection) ───────────
+rapidfuzz>=3.0.0
+
 # ── YouTube search ────────────────────────────────────────────────────────────
 yt-dlp>=2024.1.0
 

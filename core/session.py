@@ -9,7 +9,6 @@ class Mode(Enum):
     LISTING  = auto()
     PLAYING  = auto()
     BROWSING = auto()   # YouTube HUD browser is open and taking feed commands
-    HANDSFREE = auto()  # voice-driven mouse control (commands/handsfree.py)
 
 
 @dataclass

@@ -248,18 +248,19 @@ class Display:
         # ── API Keys / Integrations panel ────────────────────────────────
         elif action == 'integrations:get':
             await self._push_one(ws, json.dumps(self._integrations_state()))
-        elif action == 'integrations:set_brave':
-            self._save_api_key('brave', data.get('key', ''))
+        elif action.startswith('integrations:set_'):
+            service = action[len('integrations:set_'):]
+            self._save_api_key(service, data.get('key', ''))
             await self._push_all(json.dumps(self._integrations_state()))
-        elif action == 'integrations:test_brave':
-            from commands import search as _search
+        elif action.startswith('integrations:test_'):
+            service = action[len('integrations:test_'):]
             loop = asyncio.get_running_loop()
             # `key` lets the user test before saving; falls back to stored key.
             key = data.get('key') or None
-            res = await loop.run_in_executor(None, lambda: _search.test_brave_key(key))
+            res = await loop.run_in_executor(None, lambda: self._test_api_key(service, key))
             await self._push_one(ws, json.dumps({
                 'type':    'integrations_test_result',
-                'service': 'brave',
+                'service': service,
                 'ok':      bool(res.get('ok')),
                 'message': res.get('message', ''),
             }))
@@ -379,6 +380,20 @@ class Display:
         except Exception:
             return {}
 
+    def _test_api_key(self, service: str, key):
+        """Validate a key for the given service. brave → web search; anthropic /
+        openai → cloud vision. Returns {ok, message}."""
+        try:
+            if service == 'brave':
+                from commands import search as _search
+                return _search.test_brave_key(key)
+            if service in ('anthropic', 'openai'):
+                from commands import vision as _vision
+                return _vision.test_key(service, key)
+        except Exception as e:
+            return {'ok': False, 'message': f'Test failed: {e}'}
+        return {'ok': False, 'message': f'No test for {service}.'}
+
     def _save_api_key(self, service: str, key: str):
         """Persist an API key under settings.json -> api_keys.<service>."""
         try:
@@ -400,10 +415,17 @@ class Display:
                 'set':  bool(val),
                 'hint': ('…' + val[-4:]) if len(val) >= 4 else ('set' if val else ''),
             }
-        # Note whether the env var supplies a key even with nothing saved here.
+        # Note whether an env var supplies a key even with nothing saved here.
         if 'brave' not in out:
             from commands.search import brave_key
             out['brave'] = {'set': bool(brave_key()), 'hint': ''}
+        try:
+            from commands.vision import vision_key
+            for svc in ('anthropic', 'openai'):
+                if not out.get(svc, {}).get('set'):
+                    out[svc] = {'set': bool(vision_key(svc)), 'hint': out.get(svc, {}).get('hint', '')}
+        except Exception:
+            pass
         return {'type': 'integrations_state', 'services': out}
 
     def _load_apps(self) -> list:
