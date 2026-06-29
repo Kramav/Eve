@@ -578,11 +578,16 @@ ipcMain.on('close-youtube', () => {
 
 // ── API Keys / Integrations panel ──────────────────────────────────────────────
 
-function openIntegrations() {
-  if (integrationsWin && !integrationsWin.isDestroyed()) { integrationsWin.focus(); return }
+function openIntegrations(target) {
+  // `target` (optional) deep-links to a specific integration card via #hash.
+  if (integrationsWin && !integrationsWin.isDestroyed()) {
+    integrationsWin.focus()
+    if (target) integrationsWin.webContents.send('scroll-to', target)
+    return
+  }
   integrationsWin = new BrowserWindow({
     width: 520, height: 380, minWidth: 460, minHeight: 320,
-    title: 'Eve — API Keys',
+    title: 'Eve — Integrations',
     backgroundColor: '#080e18',
     frame: false, resizable: true,
     webPreferences: {
@@ -591,11 +596,12 @@ function openIntegrations() {
     },
   })
   integrationsWin.setMenuBarVisibility(false)
-  integrationsWin.loadFile(path.join(__dirname, 'src', 'integrations', 'index.html'))
+  integrationsWin.loadFile(path.join(__dirname, 'src', 'integrations', 'index.html'),
+                           target ? { hash: target } : undefined)
   integrationsWin.on('closed', () => { integrationsWin = null })
 }
 
-ipcMain.on('open-integrations',  openIntegrations)
+ipcMain.on('open-integrations',  (_e, target) => openIntegrations(target))
 ipcMain.on('close-integrations', () => {
   if (integrationsWin && !integrationsWin.isDestroyed()) integrationsWin.close()
 })

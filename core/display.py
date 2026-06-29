@@ -247,7 +247,10 @@ class Display:
 
         # ── API Keys / Integrations panel ────────────────────────────────
         elif action == 'integrations:get':
-            await self._push_one(ws, json.dumps(self._integrations_state()))
+            loop = asyncio.get_running_loop()
+            # Off-loop: setup status pings Ollama, so don't block the event loop.
+            payload = await loop.run_in_executor(None, self._integrations_full)
+            await self._push_one(ws, json.dumps(payload))
         elif action.startswith('integrations:set_'):
             service = action[len('integrations:set_'):]
             self._save_api_key(service, data.get('key', ''))
@@ -379,6 +382,44 @@ class Display:
             return json.loads(SETTINGS_FILE.read_text())
         except Exception:
             return {}
+
+    def _integrations_full(self) -> dict:
+        """Key state + setup readiness for tool-based integrations (Ollama, OCR,
+        UI Automation). Used by the Integrations panel's status pills."""
+        state = self._integrations_state()
+        state['setup'] = self._setup_status()
+        return state
+
+    def _setup_status(self) -> dict:
+        """Readiness of optional tool integrations. May do a quick Ollama ping —
+        callers run this off the event loop."""
+        import importlib
+
+        def _installed(mod: str) -> bool:
+            try:
+                importlib.import_module(mod)
+                return True
+            except Exception:
+                return False
+
+        out = {
+            'uiautomation': {'ready': _installed('uiautomation'), 'detail': ''},
+            'rapidocr':     {'ready': _installed('rapidocr_onnxruntime'), 'detail': ''},
+        }
+        ready, detail = False, 'not detected'
+        try:
+            import urllib.request
+            from config import OLLAMA_HOST
+            url = OLLAMA_HOST.rstrip('/') + '/api/tags'
+            with urllib.request.urlopen(url, timeout=1.5) as r:
+                models = (json.loads(r.read()).get('models') or [])
+            ready = True
+            detail = (f"running · {len(models)} model(s)" if models
+                      else "running · no models pulled yet")
+        except Exception:
+            ready, detail = False, 'not detected'
+        out['ollama'] = {'ready': ready, 'detail': detail}
+        return out
 
     def _test_api_key(self, service: str, key):
         """Validate a key for the given service. brave → web search; anthropic /

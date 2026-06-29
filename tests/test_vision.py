@@ -103,7 +103,20 @@ def test_display_integrations_imports():
     # cloud services — confirm the wiring imports cleanly (no cycle, names exist).
     import core.display  # noqa: F401
     assert hasattr(core.display.Display, "_test_api_key")
+    assert hasattr(core.display.Display, "_setup_status")
+    assert hasattr(core.display.Display, "_integrations_full")
     assert callable(V.test_key)
+
+
+def test_setup_status_shape():
+    # The Integrations panel reads tool-readiness from here. _setup_status uses
+    # no instance state, so call it on the class (self unused). May briefly ping
+    # Ollama (1.5s timeout) → 'not detected' when absent.
+    import core.display
+    st = core.display.Display._setup_status(None)
+    assert {"uiautomation", "rapidocr", "ollama"} <= set(st)
+    for entry in st.values():
+        assert "ready" in entry and isinstance(entry["ready"], bool)
 
 
 # ── Image helpers (tiny in-memory PIL image) ────────────────────────────────
