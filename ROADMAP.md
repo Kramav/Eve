@@ -76,10 +76,16 @@ Provider-based, planner-selected:
   to an element label via `rapidfuzz` (cutoff 70); declines on no match so "open firefox" still launches.
 - **Numbered coordinate overlay** *(Phase 2, done)* — "what can I click" tags each element on screen,
   reusing `display.identify_windows` (generic `{index,label,x,y,w,h}` payload).
-- **Cloud-key UI** *(Phase 2b, done)* — the API-Keys panel ([ui/src/integrations](ui/src/integrations))
-  is now **data-driven** (one card per service from a `SERVICES` list); Anthropic + OpenAI keys added.
-  `core/display._test_api_key` routes `integrations:test_<service>` to `vision.test_key` (minimal
-  `max_tokens:1` auth ping). Keys resolve via `vision.vision_key()` (settings.json → env), masked in the UI.
+- **Integrations & Setup hub** *(Phase 2b, done)* — the old "API Keys" panel
+  ([ui/src/integrations](ui/src/integrations)) became a **data-driven setup hub** (one card per
+  integration from a `SERVICES` list). **Key cards** (Brave, Anthropic, OpenAI) keep the key field +
+  Save/Test/Clear (`core/display._test_api_key` → `vision.test_key`, a `max_tokens:1` auth ping; keys
+  via `vision.vision_key()`, masked). **Tool cards** (Ollama, OCR/RapidOCR, UI Automation) show a live
+  status pill, numbered setup steps, a copyable install command, and a "Setup guide ↗" link.
+  `display._setup_status()` reports readiness (import checks + an off-loop Ollama `/api/tags` ping).
+- **Feature "Set up ↗" links** *(done)* — directory feature toggles deep-link to the relevant
+  Integrations card (`FEATURE_SETUP` map; `visual_nav` → accessibility card). `window.eve.openIntegrations(target)`
+  → `main.js` loads with `#hash` or messages the live window (`scroll-to`) → panel scrolls + highlights.
 - **`BrowserProvider`** *(Phase 2, deferred)* — documented provider slot; no automation dep today.
 - **Phase 2 remaining** — `OnnxUiBackend` model + setup download (2d); drag-and-drop; set-of-marks
   prompt mode for cloud/ollama to harden click accuracy on coordinate hallucination.
@@ -129,6 +135,11 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 - **Confidence scores** — return confidence alongside responses; surface low-confidence matches
   with a confirmation prompt rather than executing blindly. (Partly done — see `intent_match.py`
   tiered confidence; could be extended to in-pipeline intents.)
+- **Larger UI on high-res displays** — increase UI text size and maybe general UI size for 2560×1440p
+  (and higher). The Electron panels use fixed `px` font sizes/dimensions tuned for ~1080p, so they
+  read small on 1440p/4K. Options: a UI-scale setting (App Manager slider → CSS root font-size /
+  zoom factor), or auto-scale off `screen` DPI/resolution. Affects every `ui/src/*` panel + the
+  overlay; consider `rem`-based sizing or an Electron `webContents.setZoomFactor`.
 
 ### Platform
 - ~~**Windows notification integration**~~ — *done*: `core/notify.toast(title, body)` fires a native
@@ -147,6 +158,7 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 
 | Feature | Notes |
 |---------|-------|
+| Integrations & Setup hub (Phase 2b) | "API Keys" panel → data-driven setup hub ([ui/src/integrations](ui/src/integrations)): key cards (Brave/Anthropic/OpenAI, Save/Test/Clear) + tool cards (Ollama/OCR/UIA) with live status pill, setup steps, copyable install command, and guide link. `display._setup_status()` (import checks + off-loop Ollama ping). Directory feature toggles get a "Set up ↗" deep-link (`FEATURE_SETUP` → `openIntegrations(target)` → scroll + highlight). |
 | Visual Navigation Phase 2 — vision cascade | [commands/vision.py](commands/vision.py): VisionProvider is a cheapest-first cascade (OCR/RapidOCR → ONNX-stub → cloud Claude/GPT → Ollama) over one on-demand screenshot, phash-cached. Adds select-by-description (rapidfuzz), numbered coordinate overlay (reuses `identify_windows`), and a data-driven API-Keys panel with Anthropic/OpenAI keys (`vision.test_key` auth ping). Cloud/Ollama need no new dep (urllib). Default backend OCR-only — no GPU. Tests: [tests/test_vision.py](tests/test_vision.py). 2d ONNX detector still pending |
 | Hands-free → Visual Navigation skill (P1, Phase 1) | Moved hands-free mouse control out of core (`commands/handsfree.py` + `Mode.HANDSFREE` + dispatcher hooks all deleted) into optional gated skill [skills/visual_nav.py](skills/visual_nav.py). Adds UIA accessibility tier (`uiautomation`) + numbered element selection ("open number 2") + native input + planner + VisionProvider stub. Modal capture via the Converse layer (no core hook). See the P1 "Visual Navigation skill" entry |
 | Off-switches for auto-behaviors | Added `notifications` + `game_protection` feature flags ([core/features.py](core/features.py) DEFAULTS+LABELS → auto-render as App Manager toggles). `notifications` off → reminders skip the Windows toast (gated in main.py `on_reminder`); `game_protection` off → `essential.active()` returns None so fullscreen auto-detect + protect-list stop deferring focus. Both default on |
