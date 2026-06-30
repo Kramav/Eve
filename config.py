@@ -84,4 +84,23 @@ FALLBACK_LLM   = os.environ.get("FALLBACK_LLM", "none")   # "ollama" | "none"
 OLLAMA_HOST    = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL   = os.environ.get("OLLAMA_MODEL", "llama3")
 
+# ── Visual Navigation skill — vision fallback (commands/vision.py) ────────────
+# When the accessibility tier (UI Automation) can't read a window's elements,
+# the VisionProvider tries these backends in order, cheapest-first, and uses the
+# first that returns anything. Capture is on-demand (one screenshot), never
+# continuous CV. Backends:
+#   "rapidocr" → OCR text boxes on CPU (no GPU, no key, no network). DEFAULT.
+#   "onnx_ui"  → small ONNX UI-element detector for icon/no-text buttons (CPU).
+#   "claude" / "gpt" → cloud multimodal; off-machine compute, needs an API key.
+#   "ollama"   → local Ollama vision model; needs a GPU to be usable.
+# Default is OCR only — heavy/keyed tiers never fire unless you opt in here.
+VISION_BACKENDS     = [b.strip() for b in
+                       os.environ.get("EVE_VISION_BACKENDS", "rapidocr").split(",")
+                       if b.strip()]
+OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "moondream")
+# Cloud-vision keys. Like BRAVE_API_KEY, prefer the API-Keys panel (settings.json
+# api_keys.anthropic / .openai); these env vars are headless/CI overrides.
+ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY      = os.environ.get("OPENAI_API_KEY", "")
+
 # Custom commands are managed via editor.py — no need to edit here.

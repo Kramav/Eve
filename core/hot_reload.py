@@ -5,8 +5,8 @@ import threading
 import time
 
 # Reload command modules first (dispatcher imports them), then dispatcher itself.
-# commands.youtube is excluded — it holds live Selenium driver + display state
-# that would be wiped on reload.
+# Skills (skills/*.py, incl. youtube) aren't hot-reloaded — they're loaded once
+# at startup and hold live state (mpv process, Display handle) reload would wipe.
 _COMMAND_MODULES = [
     "commands.apps",
     "commands.system",

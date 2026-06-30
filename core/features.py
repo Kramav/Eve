@@ -18,10 +18,11 @@ DEFAULTS = {
     # ── Alpha (experimental) — default off, each has a fallback when off ──
     'inapp_search': False,   # off → search falls back to opening Firefox
     'mpv_youtube':  False,   # off → YouTube uses the HUD feed instead of mpv
+    'visual_nav':   False,   # hands-free mouse + element navigation (skills/visual_nav.py)
 }
 
 # Experimental features, grouped separately in the UI.
-ALPHA = {'inapp_search', 'mpv_youtube'}
+ALPHA = {'inapp_search', 'mpv_youtube', 'visual_nav'}
 
 # Human-readable labels sent to the UI
 LABELS = {
@@ -36,12 +37,14 @@ LABELS = {
     'verify_commands': 'Verify Commands Ran',
     'inapp_search': 'In-app Search Results (DDG)',
     'mpv_youtube':  'YouTube via mpv',
+    'visual_nav':   'Hands-free Visual Navigation',
 }
 
 # Why a feature is unavailable — shown as a tooltip in the UI
 _UNAVAILABLE_REASONS = {
     'mpv_youtube': 'mpv not found on PATH — install with: winget install mpv',
     'tts':         'Voice model missing — run setup.py to download it',
+    'visual_nav':  'UI Automation missing — install with: pip install uiautomation',
 }
 
 _lock   = threading.Lock()
@@ -108,6 +111,22 @@ def _compute_status() -> dict:
         status['tts'] = 'ok' if ok else 'unavailable'
     except Exception:
         status['tts'] = 'unavailable'
+
+    # Visual navigation is usable if EITHER the accessibility tier (uiautomation)
+    # OR any configured vision backend (OCR / cloud key / ollama) is available.
+    ok = False
+    try:
+        import uiautomation  # noqa: F401
+        ok = True
+    except Exception:
+        pass
+    if not ok:
+        try:
+            from commands import vision
+            ok = bool(vision.available_backends())
+        except Exception:
+            ok = False
+    status['visual_nav'] = 'ok' if ok else 'unavailable'
 
     # All other features are pure Python — always available
     for key in DEFAULTS:

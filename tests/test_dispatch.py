@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core import dispatcher as d
 from core import features, session as S
-from commands import (apps, search, system, youtube, windows as windows_cmd,
+from commands import (apps, search, system, windows as windows_cmd,
                       tiling, context as ctx_cmd, window_manager as wm)
 
 
@@ -97,11 +97,40 @@ def test_apps():
 
 # ── YouTube: HUD default + search ────────────────────────────────────────────
 
+def _youtube_mod():
+    import importlib.util
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "skills", "youtube.py")
+    spec = importlib.util.spec_from_file_location("eve_skill_youtube_test", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _yt_route(mod, text):
+    for pat, h in mod.INTENTS:
+        if re.search(pat, text):
+            return h
+    return None
+
+
 def test_youtube_routing():
-    assert route("browse youtube") is youtube.browse_feed_intent
-    assert route("open the youtube feed") is youtube.browse_feed_intent
-    assert route("play lofi beats") is youtube.play_or_search
-    assert route("search youtube for jazz") is youtube.play_or_search
+    # YouTube/mpv now lives in skills/youtube.py (PREEMPT), not core INTENTS.
+    yt = _youtube_mod()
+    assert _yt_route(yt, "browse youtube") is yt.browse_feed_intent
+    assert _yt_route(yt, "open the youtube feed") is yt.browse_feed_intent
+    assert _yt_route(yt, "open youtube") is yt.browse_home_intent
+    assert _yt_route(yt, "play lofi beats") is yt.play_or_search
+    assert _yt_route(yt, "search youtube for jazz") is yt.play_or_search
+
+
+def test_youtube_skill_is_preempt():
+    # Registered as a PREEMPT skill so its entry phrases beat open_app/web_search.
+    from core import skills
+    skills.load(display=None)
+    assert "youtube" in skills.loaded_names()
+    assert any(rx.search("open youtube") for _p, rx, _h, _f in skills._preloaded), \
+        "youtube entry intents must be in the preempt bucket"
 
 
 # ── Web search ────────────────────────────────────────────────────────────────
@@ -186,23 +215,19 @@ def test_hud_zone_monitor_targeting():
     assert route("move hud to top-left") is wm.move_orb_corner
 
 
-# ── BROWSING mode routing (YouTube HUD) ──────────────────────────────────────
-# _dispatch_browsing executes feed handlers, but with no Display wired they are
-# safe no-ops that return their spoken-confirmation strings.
+# ── YouTube feed converse (was BROWSING mode) ────────────────────────────────
+# The feed follow-ups now live in the skill's converse handler. With no Display
+# wired they're safe no-ops that return their spoken-confirmation strings.
 
-def test_browsing_mode_commands():
-    prev_mode = S.get().mode
-    try:
-        S.get().mode = S.Mode.BROWSING
-        assert d._dispatch_browsing("scroll down") is not None
-        assert d._dispatch_browsing("scroll up") is not None
-        assert d._dispatch_browsing("show numbers") is not None
-        assert d._dispatch_browsing("open video 3") is not None
-        assert d._dispatch_browsing("search for synthwave") is not None
-        # Unrelated text falls through (returns None) so normal dispatch can run.
-        assert d._dispatch_browsing("what time is it") is None
-    finally:
-        S.get().mode = prev_mode
+def test_youtube_feed_converse():
+    yt = _youtube_mod()
+    assert yt._feed_converse("scroll down") is not None
+    assert yt._feed_converse("scroll up") is not None
+    assert yt._feed_converse("show numbers") is not None
+    assert yt._feed_converse("open video 3") is not None
+    assert yt._feed_converse("search for synthwave") is not None
+    # Unrelated text declines (returns None) so dispatch falls through normally.
+    assert yt._feed_converse("what time is it") is None
 
 
 # ── Startup on login ──────────────────────────────────────────────────────────
@@ -413,6 +438,23 @@ def test_printer_cancel_requires_confirmation():
         assert "confirm" in str(resp).lower()
     finally:
         S.get().pending_confirm = None
+
+
+# ── Interface synonym (hands-free now lives in skills/visual_nav.py) ──────────
+
+def test_interface_synonym():
+    # "interface" is a spoken synonym for the HUD/overlay (toggles, same as
+    # "show hud"/"hide hud" — the toggle intent sits above directory show/hide).
+    assert route("hide interface") is system.toggle_overlay
+    assert route("show interface") is system.toggle_overlay
+
+
+def test_snap_dangling_zone_prompts():
+    # "snap steam to" (cut off) must ask where, not error with zone='to'.
+    S.reset()
+    r = str(tiling.snap_app("steam", "to")).lower()
+    assert "where" in r, r
+    S.reset()
 
 
 # ── Zero-dependency runner ────────────────────────────────────────────────────

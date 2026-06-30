@@ -5,5 +5,6 @@
     "noise_w": 0.75
   },
   "overlayDisplayId": 3804309905,
-  "overlayCorner": "bottom-left"
+  "overlayCorner": "bottom-left",
+  "ui_scale": 1.4
 }

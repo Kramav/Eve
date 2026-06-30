@@ -136,6 +136,10 @@ let _featureState   = {}
 let _featureStatus  = {}
 let _featureReasons = {}
 
+// Features whose setup lives in the Integrations panel. The value is the card to
+// deep-link to (Set up ↗ opens Integrations scrolled + highlighting that card).
+const FEATURE_SETUP = { visual_nav: 'uiautomation' }
+
 function renderFeatures(features, labels, status, reasons, alpha) {
   const alphaSet  = new Set(alpha || [])
   const keys      = Object.keys(features)
@@ -170,7 +174,18 @@ function _renderFeatureGroup(list, keys, features, labels, status, reasons) {
         if (tog.dataset.status !== 'unavailable') send('toggle_feature', { key })
       })
 
-      row.append(lbl, tog)
+      row.append(lbl)
+      const target = FEATURE_SETUP[key]
+      if (target && window.eve && window.eve.openIntegrations) {
+        const setup = document.createElement('a')
+        setup.className   = 'feature-setup'
+        setup.href        = '#'
+        setup.textContent = 'Set up ↗'
+        setup.title       = 'Open setup & install guide'
+        setup.addEventListener('click', e => { e.preventDefault(); window.eve.openIntegrations(target) })
+        row.append(setup)
+      }
+      row.append(tog)
       list.appendChild(row)
       _featureState[key] = undefined
       _featureStatus[key] = undefined
@@ -232,6 +247,18 @@ document.getElementById('clr-btn').addEventListener('click', () => {
   const empty = document.getElementById('feed-empty')
   if (empty) empty.style.display = ''
 })
+
+// Reset Window Layout — forget saved panel sizes (panels reopen at default).
+{
+  const resetBtn = document.getElementById('reset-layout-btn')
+  if (resetBtn && window.eve && window.eve.resetWindowLayout) {
+    resetBtn.addEventListener('click', () => {
+      window.eve.resetWindowLayout()
+      resetBtn.textContent = 'Reset ✓'
+      setTimeout(() => { resetBtn.textContent = 'Reset size' }, 1500)
+    })
+  }
+}
 
 document.getElementById('expand-btn').addEventListener('click', () => window.eve.toggleDirectorySize())
 

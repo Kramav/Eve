@@ -70,7 +70,7 @@ def _h_snap(a):           from commands import tiling;    return tiling.snap_app
 def _h_front(a):          from commands import window_manager as wm; return wm.bring_to_front(str(a.get("app", "")))
 def _h_search(a):         from commands import search;    return search.web_search_list(str(a.get("query", "")))
 def _h_goto(a):           from commands import search;    return search.go_to_site(str(a.get("url", "")))
-def _h_youtube(a):        from commands import youtube;   return youtube.play_or_search(str(a.get("query", "")))
+def _h_youtube(a):        from core import skills;        return skills.dispatch_preempt("play " + str(a.get("query", ""))) or "YouTube isn't available right now."
 def _h_timer(a):          from commands import reminders; return reminders.set_timer(str(a.get("minutes", "")))
 def _h_remind(a):         from commands import context;   return context.remind(str(a.get("task", "")))
 
