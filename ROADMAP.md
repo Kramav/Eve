@@ -83,6 +83,11 @@ Provider-based, planner-selected:
   via `vision.vision_key()`, masked). **Tool cards** (Ollama, OCR/RapidOCR, UI Automation) show a live
   status pill, numbered setup steps, a copyable install command, and a "Setup guide ↗" link.
   `display._setup_status()` reports readiness (import checks + an off-loop Ollama `/api/tags` ping).
+  **One-click Install** *(done)* — pip-based tiers (RapidOCR, UI Automation) install from the panel via
+  `integrations:install_<id>` → `display._install_integration` (subprocess pip, then `features.refresh_status`
+  + pill/snapshot refresh); `_INSTALLERS` map gates which get a button. System installers (Ollama) keep the
+  guide + command. **Extensible:** add a `SERVICES` entry (UI) + `_INSTALLERS` entry (pip) for Kokoro TTS,
+  mpv, etc.
 - **Feature "Set up ↗" links** *(done)* — directory feature toggles deep-link to the relevant
   Integrations card (`FEATURE_SETUP` map; `visual_nav` → accessibility card). `window.eve.openIntegrations(target)`
   → `main.js` loads with `#hash` or messages the live window (`scroll-to`) → panel scrolls + highlights.
@@ -135,7 +140,10 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 - **Confidence scores** — return confidence alongside responses; surface low-confidence matches
   with a confirmation prompt rather than executing blindly. (Partly done — see `intent_match.py`
   tiered confidence; could be extended to in-pipeline intents.)
-- **Larger UI on high-res displays** — increase UI text size and maybe general UI size for 2560×1440p
+- **Larger UI on high-res displays** — *DONE: panels auto-zoom on 1440p (1.25×) / 4K (1.5×) via
+  `webContents.setZoomFactor` (global `web-contents-created` hook gated to panel folders; orb/directory/
+  tag overlays excluded). App Manager **UI SIZE** slider (0.8–2.0×) live-applies + persists to
+  `settings.json` `ui_scale`. `ui/main.js`, `ui/preload.js`, `ui/src/app-manager`.* Original note: increase UI text size and maybe general UI size for 2560×1440p
   (and higher). The Electron panels use fixed `px` font sizes/dimensions tuned for ~1080p, so they
   read small on 1440p/4K. Options: a UI-scale setting (App Manager slider → CSS root font-size /
   zoom factor), or auto-scale off `screen` DPI/resolution. Affects every `ui/src/*` panel + the

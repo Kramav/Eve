@@ -394,3 +394,22 @@ function renderDisplays(displays) {
 }
 
 loadDisplays()
+
+// ── UI scale slider (zooms panels for high-res displays) ────────────────────
+async function loadUiScale() {
+  const slider = document.getElementById('ui-scale')
+  const valEl  = document.getElementById('ui-scale-val')
+  if (!slider || !window.eve || !window.eve.getUiScale) return
+  const show = v => { valEl.textContent = `${Math.round(v * 100)}%` }
+  try {
+    const cur = await window.eve.getUiScale()
+    slider.value = cur; show(cur)
+  } catch (_) {}
+  slider.addEventListener('input', () => {
+    const v = Number(slider.value)
+    show(v)
+    window.eve.setUiScale(v)   // live-applies to all open panels + persists
+  })
+}
+
+loadUiScale()

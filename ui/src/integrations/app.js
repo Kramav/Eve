@@ -36,18 +36,18 @@ const SERVICES = [
             "Vision: set EVE_VISION_BACKENDS=rapidocr,ollama", "Q&A fallback: set FALLBACK_LLM=ollama"],
   },
   {
-    kind: 'tool', id: 'rapidocr', title: 'OCR vision (no GPU)',
+    kind: 'tool', id: 'rapidocr', title: 'OCR vision (no GPU)', installable: true,
     desc: "Reads on-screen text so hands-free navigation works on any app, on any machine. CPU-only — the default vision tier.",
     guide: 'https://github.com/RapidAI/RapidOCR',
     install: 'pip install rapidocr-onnxruntime',
-    steps: ["Run the install command", "That's it — it's the default vision tier"],
+    steps: ["Press Install (or run the command)", "That's it — it's the default vision tier"],
   },
   {
-    kind: 'tool', id: 'uiautomation', title: 'Accessibility navigation (most accurate)',
+    kind: 'tool', id: 'uiautomation', title: 'Accessibility navigation (most accurate)', installable: true,
     desc: "Reads real links/buttons from apps that expose them (Firefox, Chrome, Electron). The top hands-free tier — used before any screenshot.",
     guide: 'https://github.com/yinkaisheng/Python-UIAutomation-for-Windows',
     install: 'pip install uiautomation',
-    steps: ["Run the install command", "Enable 'Hands-free Visual Navigation' in the App Manager"],
+    steps: ["Press Install (or run the command)", "Enable 'Hands-free Visual Navigation' in the App Manager"],
   },
 ]
 
@@ -62,7 +62,11 @@ function connect() {
       if (msg.type === 'integrations_state') {
         _setup = msg.setup || _setup
         applyState(msg.services || {})
+        // Re-enable any Install button now that fresh status arrived.
+        document.querySelectorAll('[data-install-btn]').forEach(b => { b.disabled = false })
       } else if (msg.type === 'integrations_test_result') {
+        flash(msg.message, msg.ok ? 'ok' : 'error')
+      } else if (msg.type === 'integrations_install_result') {
         flash(msg.message, msg.ok ? 'ok' : 'error')
       }
     } catch (_) {}
@@ -108,6 +112,7 @@ function toolCard(s) {
     <div class="btn-row">
       <a class="link-btn" data-guide href="#">Setup guide ↗</a>
       <span class="spacer"></span>
+      ${s.installable ? '<button class="save-btn" data-install-btn>Install</button>' : ''}
     </div>`
 }
 
@@ -153,6 +158,12 @@ function render() {
       if (copy) copy.onclick = async () => {
         try { await navigator.clipboard.writeText(svc.install); flash('Command copied.', 'ok') }
         catch (_) { flash('Select the command and copy it.', 'busy') }
+      }
+      const inst = card.querySelector('[data-install-btn]')
+      if (inst) inst.onclick = () => {
+        inst.disabled = true
+        flash(`Installing ${svc.title}… this can take a minute.`, 'busy')
+        send('integrations:install_' + id)
       }
     }
   })

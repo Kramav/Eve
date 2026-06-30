@@ -108,6 +108,19 @@ def test_display_integrations_imports():
     assert callable(V.test_key)
 
 
+def test_install_integration_mapping():
+    # One-click installers exist for the pip-based tiers; unknown service is a
+    # clean decline (no subprocess run). Don't trigger a real install here.
+    import core.display
+    D = core.display.Display
+    assert {"rapidocr", "uiautomation"} <= set(D._INSTALLERS)
+
+    class _S:                                    # stand-in self (carries the map)
+        _INSTALLERS = D._INSTALLERS
+    res = D._install_integration(_S(), "ollama")  # system installer → no pip run
+    assert res["ok"] is False and "guide" in res["message"].lower()
+
+
 def test_setup_status_shape():
     # The Integrations panel reads tool-readiness from here. _setup_status uses
     # no instance state, so call it on the class (self unused). May briefly ping

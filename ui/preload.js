@@ -42,6 +42,8 @@ contextBridge.exposeInMainWorld('eve', {
   openIntegrations:    (target) => ipcRenderer.send('open-integrations', target),
   closeIntegrations:   () => ipcRenderer.send('close-integrations'),
   onScrollTo:          (cb) => ipcRenderer.on('scroll-to', (_e, target) => cb(target)),
+  getUiScale:          () => ipcRenderer.invoke('get-ui-scale'),
+  setUiScale:          (v) => ipcRenderer.send('set-ui-scale', v),
   openExternal:        (url) => ipcRenderer.send('open-external', url),
   closeSelf:           () => ipcRenderer.send('close-self'),
   maximizeSelf:        () => ipcRenderer.send('maximize-self'),

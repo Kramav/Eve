@@ -251,6 +251,20 @@ class Display:
             # Off-loop: setup status pings Ollama, so don't block the event loop.
             payload = await loop.run_in_executor(None, self._integrations_full)
             await self._push_one(ws, json.dumps(payload))
+        elif action.startswith('integrations:install_'):
+            service = action[len('integrations:install_'):]
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, lambda: self._install_integration(service))
+            await self._push_one(ws, json.dumps({
+                'type':    'integrations_install_result',
+                'service': service,
+                'ok':      bool(res.get('ok')),
+                'message': res.get('message', ''),
+            }))
+            # Refresh the setup pills + the main feature snapshot (status may flip).
+            payload = await loop.run_in_executor(None, self._integrations_full)
+            await self._push_one(ws, json.dumps(payload))
+            self._broadcast()
         elif action.startswith('integrations:set_'):
             service = action[len('integrations:set_'):]
             self._save_api_key(service, data.get('key', ''))
@@ -382,6 +396,35 @@ class Display:
             return json.loads(SETTINGS_FILE.read_text())
         except Exception:
             return {}
+
+    # Optional integrations that install cleanly via pip (one-click from the UI).
+    # System installers (Ollama) keep a guide link instead — see the panel.
+    _INSTALLERS = {
+        'rapidocr':     'rapidocr-onnxruntime',
+        'uiautomation': 'uiautomation',
+    }
+
+    def _install_integration(self, service: str) -> dict:
+        """Install an optional integration via pip. Returns {ok, message}."""
+        import subprocess
+        import sys
+        pkg = self._INSTALLERS.get(service)
+        if not pkg:
+            return {'ok': False, 'message': f'No one-click installer for {service} — use the guide.'}
+        try:
+            p = subprocess.run([sys.executable, '-m', 'pip', 'install', pkg],
+                               capture_output=True, text=True, timeout=600)
+        except Exception as e:
+            return {'ok': False, 'message': f'Could not start install: {e}'}
+        if p.returncode == 0:
+            try:
+                from core import features as _features
+                _features.refresh_status()
+            except Exception:
+                pass
+            return {'ok': True, 'message': f'{pkg} installed. Restart Eve if it isn’t detected.'}
+        tail = (p.stderr or p.stdout or '').strip().splitlines()
+        return {'ok': False, 'message': f'Install failed: {tail[-1][:120] if tail else "see console"}'}
 
     def _integrations_full(self) -> dict:
         """Key state + setup readiness for tool-based integrations (Ollama, OCR,

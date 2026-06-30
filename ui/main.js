@@ -1022,7 +1022,72 @@ function broadcastDisplayChange() {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+// ── UI scaling for high-res displays (1440p / 4K) ───────────────────────────
+// Panels use fixed px sizing tuned for ~1080p; on a 1440p/4K monitor we zoom the
+// whole panel (text + controls). The orb, directory, and positioned tag overlays
+// are NOT zoomed — their geometry is computed, not content-scaled.
+const _PANEL_FOLDERS = new Set([
+  'app-manager', 'window-manager', 'voice-settings', 'command-editor',
+  'programs', 'memory', 'reminders', 'integrations',
+])
+let _uiScale = 1.0
+
+function _autoUiScale() {
+  try {
+    const w = screen.getPrimaryDisplay().size.width
+    if (w >= 3840) return 1.5      // 4K
+    if (w >= 2560) return 1.25     // 1440p
+  } catch (_) {}
+  return 1.0
+}
+
+function _readUiScale() {
+  try {
+    const s = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'settings.json'), 'utf8'))
+    const v = Number(s.ui_scale)
+    if (v && v > 0) return Math.min(2.0, Math.max(0.8, v))   // explicit override
+  } catch (_) {}
+  return _autoUiScale()
+}
+
+function _persistUiScale(v) {
+  try {
+    const file = path.join(__dirname, '..', 'settings.json')
+    let s = {}
+    try { s = JSON.parse(fs.readFileSync(file, 'utf8')) } catch (_) {}
+    s.ui_scale = v
+    fs.writeFileSync(file, JSON.stringify(s, null, 2))
+  } catch (_) {}
+}
+
+function _panelOf(contents) {
+  const m = (contents.getURL() || '').match(/\/src\/([^/]+)\/index\.html/)
+  return m && _PANEL_FOLDERS.has(m[1]) ? m[1] : null
+}
+
+function _applyUiScaleToOpenPanels() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try { if (_panelOf(win.webContents)) win.webContents.setZoomFactor(_uiScale) } catch (_) {}
+  }
+}
+
+// Zoom each panel as it finishes loading. Global hook → covers every panel,
+// current and future, without editing each open* function.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('did-finish-load', () => {
+    try { if (_panelOf(contents)) contents.setZoomFactor(_uiScale) } catch (_) {}
+  })
+})
+
+ipcMain.handle('get-ui-scale', () => _uiScale)
+ipcMain.on('set-ui-scale', (_e, v) => {
+  _uiScale = Math.min(2.0, Math.max(0.8, Number(v) || 1.0))
+  _persistUiScale(_uiScale)
+  _applyUiScaleToOpenPanels()
+})
+
 app.whenReady().then(() => {
+  _uiScale = _readUiScale()      // screen is available now → auto-scale works
   createOrbWin()
   createDirWin()   // pre-warm: content loads in background before first open
   createTray()
