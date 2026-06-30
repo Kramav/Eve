@@ -92,8 +92,13 @@ Provider-based, planner-selected:
   Integrations card (`FEATURE_SETUP` map; `visual_nav` → accessibility card). `window.eve.openIntegrations(target)`
   → `main.js` loads with `#hash` or messages the live window (`scroll-to`) → panel scrolls + highlights.
 - **`BrowserProvider`** *(Phase 2, deferred)* — documented provider slot; no automation dep today.
-- **Phase 2 remaining** — `OnnxUiBackend` model + setup download (2d); drag-and-drop; set-of-marks
-  prompt mode for cloud/ollama to harden click accuracy on coordinate hallucination.
+- **Set-of-marks** *(done)* — cloud/Ollama backends route through `vision._model_detect`: OCR provides
+  pixel-accurate candidate boxes, `_mark_image` draws numbered marks, the model picks/labels **by number**
+  (`_SOM_PROMPT`) and `_elements_from_marks` maps back to the OCR geometry — no coordinate hallucination.
+  Falls back to direct box-detection when OCR yields nothing. Use via `EVE_VISION_BACKENDS=claude` (OCR runs
+  inside the cloud tier). Tests in [tests/test_vision.py](tests/test_vision.py).
+- **Phase 2 remaining** — `OnnxUiBackend` model + setup download (2d); drag-and-drop; larger marker font
+  for set-of-marks readability at downscaled sizes.
 
 Tests: [tests/test_visual_nav.py](tests/test_visual_nav.py) (parser/planner/handler/select-by-desc) +
 [tests/test_vision.py](tests/test_vision.py) (cascade order, key resolution, JSON parse + scaling,
@@ -166,6 +171,7 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 
 | Feature | Notes |
 |---------|-------|
+| Persistent window state (app-wide) | Centralized `ui/main.js` `createManagedWindow(name, options)` factory — restores saved size → creates → persists, with persistence logic fully separate from window creation. All 8 resizable panels (app-manager, window-manager, voice-settings, command-editor, programs, memory, reminders, integrations) route through it; a future window gets persistence by just calling the factory. Stored as `settings.json` `windowState[name] = {width,height}` (object → position/maximized/fullscreen later, no migration). `_restoreSize` validates (clamp to work area, enforce minimums, fall back on corrupt/missing — handles monitor changes); save is debounced 400ms on resize + a final save on `close`, skipping maximized/minimized. Orb / directory / tag overlays / corner YouTube window intentionally excluded (positioned/fixed). "Reset size" button in the routing directory's WINDOW LAYOUT section → `reset-window-layout` IPC clears all `windowState` + snaps every open managed window to its default. Reuses shared `_readSettings`/`_writeSettings` (also ui_scale/api_keys). |
 | Integrations & Setup hub (Phase 2b) | "API Keys" panel → data-driven setup hub ([ui/src/integrations](ui/src/integrations)): key cards (Brave/Anthropic/OpenAI, Save/Test/Clear) + tool cards (Ollama/OCR/UIA) with live status pill, setup steps, copyable install command, and guide link. `display._setup_status()` (import checks + off-loop Ollama ping). Directory feature toggles get a "Set up ↗" deep-link (`FEATURE_SETUP` → `openIntegrations(target)` → scroll + highlight). |
 | Visual Navigation Phase 2 — vision cascade | [commands/vision.py](commands/vision.py): VisionProvider is a cheapest-first cascade (OCR/RapidOCR → ONNX-stub → cloud Claude/GPT → Ollama) over one on-demand screenshot, phash-cached. Adds select-by-description (rapidfuzz), numbered coordinate overlay (reuses `identify_windows`), and a data-driven API-Keys panel with Anthropic/OpenAI keys (`vision.test_key` auth ping). Cloud/Ollama need no new dep (urllib). Default backend OCR-only — no GPU. Tests: [tests/test_vision.py](tests/test_vision.py). 2d ONNX detector still pending |
 | Hands-free → Visual Navigation skill (P1, Phase 1) | Moved hands-free mouse control out of core (`commands/handsfree.py` + `Mode.HANDSFREE` + dispatcher hooks all deleted) into optional gated skill [skills/visual_nav.py](skills/visual_nav.py). Adds UIA accessibility tier (`uiautomation`) + numbered element selection ("open number 2") + native input + planner + VisionProvider stub. Modal capture via the Converse layer (no core hook). See the P1 "Visual Navigation skill" entry |

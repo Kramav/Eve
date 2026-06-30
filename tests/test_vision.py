@@ -90,6 +90,57 @@ def test_el_center():
     assert e["center"] == (120, 210)
 
 
+# ── Set-of-marks ─────────────────────────────────────────────────────────────
+
+def test_elements_from_marks_maps_to_box_geometry():
+    boxes = [(10, 20, 30, 40), (50, 60, 70, 80)]
+    items = [{"n": 2, "label": "Play", "type": "button"}, {"n": 9, "label": "x"}]
+    els = V._elements_from_marks(items, boxes)
+    assert len(els) == 1                              # out-of-range n dropped
+    assert els[0]["label"] == "Play"
+    assert els[0]["bounds"] == (50, 60, 70, 80)       # geometry from OCR box
+    assert els[0]["center"] == (85, 100)
+
+
+def test_model_detect_uses_set_of_marks(monkeypatch):
+    boxes = [(0, 0, 10, 10), (100, 100, 20, 20)]
+    monkeypatch.setattr(V, "_candidate_boxes", lambda img, **k: boxes)
+    monkeypatch.setattr(V, "_mark_image", lambda img, b: img)     # skip PIL draw
+    monkeypatch.setattr(V, "_downscale", lambda img, w: (img, 1.0))
+    monkeypatch.setattr(V, "to_base64", lambda img: "x")
+
+    def call(b64, prompt):
+        assert prompt is V._SOM_PROMPT                # used the set-of-marks prompt
+        return '[{"n": 2, "label": "Go", "type": "link"}]'
+
+    els = V._model_detect(object(), call)
+    assert els[0]["bounds"] == (100, 100, 20, 20)     # mapped to box #2's geometry
+    assert els[0]["label"] == "Go"
+
+
+def test_model_detect_falls_back_to_direct(monkeypatch):
+    monkeypatch.setattr(V, "_candidate_boxes", lambda img, **k: [])  # no OCR boxes
+    monkeypatch.setattr(V, "_downscale", lambda img, w: (img, 1.0))
+    monkeypatch.setattr(V, "to_base64", lambda img: "x")
+
+    class _Img:
+        width, height = 800, 600
+
+    def call(b64, prompt):
+        assert prompt is not V._SOM_PROMPT            # direct prompt, not marks
+        return '[{"label":"L","type":"link","x":1,"y":2,"w":3,"h":4}]'
+
+    els = V._model_detect(_Img(), call)
+    assert els[0]["bounds"] == (1, 2, 3, 4)
+
+
+def test_mark_image_returns_same_size():
+    from PIL import Image
+    img = Image.new("RGB", (200, 100))
+    out = V._mark_image(img, [(10, 10, 30, 20), (50, 40, 25, 25)])
+    assert out.size == (200, 100)
+
+
 # ── Key tester + imports ─────────────────────────────────────────────────────
 
 def test_test_key_no_key():

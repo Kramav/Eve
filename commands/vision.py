@@ -127,6 +127,81 @@ def _elements_from_model(items, scale: float):
     return out or None
 
 
+# ── Set-of-marks (precise boxes from OCR, semantics from the model) ──────────
+# Vision LLMs hallucinate pixel coordinates. Instead of asking the model for
+# boxes, we get candidate boxes from OCR (pixel-accurate), draw NUMBERED marks on
+# the screenshot, and ask the model only which numbers are clickable + what they
+# are. Geometry stays exact; the model just filters + labels.
+
+_SOM_PROMPT = (
+    "Each candidate UI element in this screenshot is outlined by a numbered red "
+    "box. Return ONLY a JSON array of the ones a user could click (links, "
+    "buttons, videos, list items, tabs) — skip plain body text and labels. "
+    'Each item: {"n": <the box number>, "label": "<short name>", '
+    '"type": "<link|button|video|item|tab>"}. Cap at 40.'
+)
+
+
+def _candidate_boxes(img, cap=40):
+    """Geometry-only candidate boxes (pixel-accurate) from OCR. Empty when OCR is
+    unavailable or finds nothing — caller then falls back to direct detection."""
+    ocr = OcrBackend()
+    try:
+        if not ocr.available():
+            return []
+        els = ocr.elements(img) or []
+    except Exception:
+        return []
+    return [e["bounds"] for e in els[:cap]]
+
+
+def _mark_image(img, boxes):
+    """Draw a numbered red box over each candidate; returns a new PIL image."""
+    try:
+        from PIL import ImageDraw
+        out = img.copy()
+        d = ImageDraw.Draw(out)
+        for i, (x, y, w, h) in enumerate(boxes, 1):
+            d.rectangle([x, y, x + w, y + h], outline=(255, 40, 40), width=2)
+            d.text((x + 3, y + 1), str(i), fill=(255, 40, 40))
+        return out
+    except Exception:
+        return img
+
+
+def _elements_from_marks(items, boxes):
+    """Map the model's picks ({n,label,type}) back to candidate box geometry, so
+    coordinates come from OCR (precise) and only labels come from the model."""
+    out = []
+    for it in items or []:
+        try:
+            n = int(it["n"])
+            if 1 <= n <= len(boxes):
+                x, y, w, h = boxes[n - 1]
+                out.append(_el(it.get("label") or f"item {n}", it.get("type", "item"),
+                               x, y, w, h, float(it.get("confidence", 0.9))))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return out or None
+
+
+def _model_detect(img, call):
+    """Multimodal detection. SET-OF-MARKS when OCR yields candidate boxes
+    (numbered overlay → model picks by number → pixel-accurate boxes); otherwise
+    ask the model for boxes directly. `call` is (b64_png, prompt) -> text|None."""
+    boxes = _candidate_boxes(img)
+    if boxes:
+        marked, _ = _downscale(_mark_image(img, boxes), 1280)
+        els = _elements_from_marks(
+            _parse_json_array(call(to_base64(marked), _SOM_PROMPT)), boxes)
+        if els:
+            return els
+    # No candidate boxes (or set-of-marks returned nothing) → direct detection.
+    sent, scale = _downscale(img, 1280)
+    text = call(to_base64(sent), _PROMPT.format(w=sent.width, h=sent.height))
+    return _elements_from_model(_parse_json_array(text), scale)
+
+
 # ── API-key resolution (mirrors commands.search.brave_key) ───────────────────
 
 def vision_key(service: str) -> str:
@@ -260,14 +335,8 @@ class CloudVisionBackend:
         return bool(key)
 
     def elements(self, img):
-        sent, scale = _downscale(img, 1280)
-        prompt = _PROMPT.format(w=sent.width, h=sent.height)
-        b64 = to_base64(sent)
-        if self.service == "claude":
-            text = self._claude(b64, prompt)
-        else:
-            text = self._gpt(b64, prompt)
-        return _elements_from_model(_parse_json_array(text), scale)
+        # Set-of-marks (precise boxes from OCR) when available, else direct.
+        return _model_detect(img, self._claude if self.service == "claude" else self._gpt)
 
     def _claude(self, b64, prompt):
         key = vision_key("anthropic")
@@ -315,17 +384,15 @@ class OllamaVisionBackend:
         return "ollama" in getattr(config, "VISION_BACKENDS", [])
 
     def elements(self, img):
-        sent, scale = _downscale(img, 1280)
-        prompt = _PROMPT.format(w=sent.width, h=sent.height)
-        body = {
-            "model": getattr(config, "OLLAMA_VISION_MODEL", "moondream"),
-            "prompt": prompt, "images": [to_base64(sent)], "stream": False,
-        }
-        host = getattr(config, "OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-        data = _http_post(f"{host}/api/generate", {}, body)
-        if not data:
-            return None
-        return _elements_from_model(_parse_json_array(data.get("response", "")), scale)
+        def call(b64, prompt):
+            host = getattr(config, "OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+            data = _http_post(f"{host}/api/generate", {}, {
+                "model": getattr(config, "OLLAMA_VISION_MODEL", "moondream"),
+                "prompt": prompt, "images": [b64], "stream": False,
+            })
+            return data.get("response") if data else None
+        # Set-of-marks (precise boxes from OCR) when available, else direct.
+        return _model_detect(img, call)
 
 
 def _make(name: str):

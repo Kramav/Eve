@@ -248,6 +248,18 @@ document.getElementById('clr-btn').addEventListener('click', () => {
   if (empty) empty.style.display = ''
 })
 
+// Reset Window Layout — forget saved panel sizes (panels reopen at default).
+{
+  const resetBtn = document.getElementById('reset-layout-btn')
+  if (resetBtn && window.eve && window.eve.resetWindowLayout) {
+    resetBtn.addEventListener('click', () => {
+      window.eve.resetWindowLayout()
+      resetBtn.textContent = 'Reset ✓'
+      setTimeout(() => { resetBtn.textContent = 'Reset size' }, 1500)
+    })
+  }
+}
+
 document.getElementById('expand-btn').addEventListener('click', () => window.eve.toggleDirectorySize())
 
 if (window.eve.onDirectorySizeChanged) {
