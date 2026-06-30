@@ -34,10 +34,22 @@ That's it. Restart Eve and say "say hello".
 ```python
 PRIORITY = 10                  # higher runs first across skills (default 0)
 FEATURE  = "my_feature"        # gate the skill on a features.json flag
+PREEMPT  = True                # run this skill BEFORE the built-ins (default off)
 
 def setup(display):            # called once at load; `display` may be None
     ...                        # stash it if your handlers need to drive the UI
 ```
+
+### `PREEMPT` — own a phrase the built-ins would otherwise take
+
+By default skills run *after* the built-in commands, so they extend Eve without
+overriding it. If your skill needs to claim a phrase a built-in would catch
+first — e.g. "open youtube" would otherwise become "open the *youtube* app" — set
+`PREEMPT = True` and its intents are tried *before* the built-in table. Use it
+sparingly; it lets a skill shadow core. See [youtube.py](youtube.py), which uses
+`PREEMPT` for its entry commands and the **converse layer**
+(`core.session.start_converse`) for stateful follow-ups (feed scrolling, list
+selection, mpv playback) instead of any core routing.
 
 ## Rules of the road
 

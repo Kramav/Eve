@@ -47,6 +47,68 @@ Recent features (focus-essential, workspace presets, monitor naming, Ollama fall
   two Kokoro model files in `models/kokoro/`. **Remaining (user step):** `pip install kokoro-onnx`
   + download the model files, then pick a voice. No code left.
 
+### Visual Navigation skill — *Phase 1 done; Phase 2 mostly done (2d ONNX detector pending)*
+Hands-free mouse control was refactored out of core into an optional, feature-gated drop-in skill
+([skills/visual_nav.py](skills/visual_nav.py), `visual_nav` flag, default off, Alpha group). It grew
+from "nudge the mouse" into voice-driven element navigation: enumerate the interactive elements of
+the focused window and pick them by number ("what can I click" → "open number 2"). Cheapest-method
+priority order, **no continuous computer vision**.
+
+Provider-based, planner-selected:
+- **`AccessibilityProvider`** *(Phase 1, done)* — Windows UI Automation control tree of the
+  foreground window (Hyperlink/Button/ListItem/TabItem/…), via the new `uiautomation` dep. Lazy +
+  guarded; feature shows "unavailable — pip install uiautomation" when absent.
+- **`InputController`** *(Phase 1, done)* — native pyautogui move/click/double/right/scroll + key_ops
+  type/hotkey (absorbed the old `commands/handsfree.py` mouse logic).
+- **`NavigationPlanner`** *(Phase 1, done)* — accessibility → vision fallback; numbers elements,
+  drives the cursor to a chosen one. Light cache keyed by foreground (hwnd, title).
+- **Modal capture** *(Phase 1, done)* — via the existing Converse layer (no `Mode.HANDSFREE` hook in
+  core), so the skill is fully decoupled. Declines fall through so normal commands still work mid-mode.
+- **`VisionProvider`** *(Phase 2, done)* — a **cascade of backends** in [commands/vision.py](commands/vision.py),
+  tried cheapest-first via `config.VISION_BACKENDS` (default `["rapidocr"]`). On-demand screenshot only,
+  **no continuous CV**; result cached by an 8×8 perceptual hash so an unchanged screen isn't re-scanned.
+  Backends: **`OcrBackend`** (RapidOCR, CPU, no GPU/key — the low-end default) · **`CloudVisionBackend`**
+  (Claude `claude-haiku-4-5` / GPT `gpt-4o-mini` via stdlib urllib, set-of-marks-friendly, off-machine
+  compute for weak hardware) · **`OllamaVisionBackend`** (local `moondream`/llava, needs a GPU) ·
+  **`OnnxUiBackend`** *(2d, dormant — `available()=False` until a detector model is dropped at
+  `models/ui_detector.onnx`)*. Cloud/Ollama add **no dependency** (urllib).
+- **Select-by-description** *(Phase 2, done)* — "open the tutorial video" fuzzy-matches the spoken phrase
+  to an element label via `rapidfuzz` (cutoff 70); declines on no match so "open firefox" still launches.
+- **Numbered coordinate overlay** *(Phase 2, done)* — "what can I click" tags each element on screen,
+  reusing `display.identify_windows` (generic `{index,label,x,y,w,h}` payload).
+- **Integrations & Setup hub** *(Phase 2b, done)* — the old "API Keys" panel
+  ([ui/src/integrations](ui/src/integrations)) became a **data-driven setup hub** (one card per
+  integration from a `SERVICES` list). **Key cards** (Brave, Anthropic, OpenAI) keep the key field +
+  Save/Test/Clear (`core/display._test_api_key` → `vision.test_key`, a `max_tokens:1` auth ping; keys
+  via `vision.vision_key()`, masked). **Tool cards** (Ollama, OCR/RapidOCR, UI Automation) show a live
+  status pill, numbered setup steps, a copyable install command, and a "Setup guide ↗" link.
+  `display._setup_status()` reports readiness (import checks + an off-loop Ollama `/api/tags` ping).
+  **One-click Install** *(done)* — pip-based tiers (RapidOCR, UI Automation) install from the panel via
+  `integrations:install_<id>` → `display._install_integration` (subprocess pip, then `features.refresh_status`
+  + pill/snapshot refresh); `_INSTALLERS` map gates which get a button. System installers (Ollama) keep the
+  guide + command. **Extensible:** add a `SERVICES` entry (UI) + `_INSTALLERS` entry (pip) for Kokoro TTS,
+  mpv, etc.
+- **Feature "Set up ↗" links** *(done)* — directory feature toggles deep-link to the relevant
+  Integrations card (`FEATURE_SETUP` map; `visual_nav` → accessibility card). `window.eve.openIntegrations(target)`
+  → `main.js` loads with `#hash` or messages the live window (`scroll-to`) → panel scrolls + highlights.
+- **`BrowserProvider`** *(Phase 2, deferred)* — documented provider slot; no automation dep today.
+- **Set-of-marks** *(done)* — cloud/Ollama backends route through `vision._model_detect`: OCR provides
+  pixel-accurate candidate boxes, `_mark_image` draws numbered marks, the model picks/labels **by number**
+  (`_SOM_PROMPT`) and `_elements_from_marks` maps back to the OCR geometry — no coordinate hallucination.
+  Falls back to direct box-detection when OCR yields nothing. Use via `EVE_VISION_BACKENDS=claude` (OCR runs
+  inside the cloud tier). Tests in [tests/test_vision.py](tests/test_vision.py).
+- **Phase 2 remaining** — `OnnxUiBackend` model + setup download (2d); drag-and-drop; larger marker font
+  for set-of-marks readability at downscaled sizes.
+
+Tests: [tests/test_visual_nav.py](tests/test_visual_nav.py) (parser/planner/handler/select-by-desc) +
+[tests/test_vision.py](tests/test_vision.py) (cascade order, key resolution, JSON parse + scaling,
+phash, key-tester) — all against fakes, no UIA/OCR/network/mouse. **Known minor gap:** "start/launch
+hands free mode" routes to app-launch (skill intents run after `apps.open_app`); "hands free mode" /
+"mouse mode" / "enter hands-free mode" work. **Remaining (user steps):** `pip install uiautomation`
+(accessibility tier) and optionally `pip install rapidocr-onnxruntime` (OCR vision tier, no GPU); enable
+"Hands-free Visual Navigation" in the App Manager. Cloud vision: add an Anthropic/OpenAI key in the
+API-Keys panel and set `EVE_VISION_BACKENDS=rapidocr,claude` (or `gpt`/`ollama`).
+
 ---
 
 ## P2 — Medium Priority
@@ -83,6 +145,14 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 - **Confidence scores** — return confidence alongside responses; surface low-confidence matches
   with a confirmation prompt rather than executing blindly. (Partly done — see `intent_match.py`
   tiered confidence; could be extended to in-pipeline intents.)
+- **Larger UI on high-res displays** — *DONE: panels auto-zoom on 1440p (1.25×) / 4K (1.5×) via
+  `webContents.setZoomFactor` (global `web-contents-created` hook gated to panel folders; orb/directory/
+  tag overlays excluded). App Manager **UI SIZE** slider (0.8–2.0×) live-applies + persists to
+  `settings.json` `ui_scale`. `ui/main.js`, `ui/preload.js`, `ui/src/app-manager`.* Original note: increase UI text size and maybe general UI size for 2560×1440p
+  (and higher). The Electron panels use fixed `px` font sizes/dimensions tuned for ~1080p, so they
+  read small on 1440p/4K. Options: a UI-scale setting (App Manager slider → CSS root font-size /
+  zoom factor), or auto-scale off `screen` DPI/resolution. Affects every `ui/src/*` panel + the
+  overlay; consider `rem`-based sizing or an Electron `webContents.setZoomFactor`.
 
 ### Platform
 - ~~**Windows notification integration**~~ — *done*: `core/notify.toast(title, body)` fires a native
@@ -209,6 +279,11 @@ verification confirms they actually took. Tiered by daily value × low friction.
 |---------|-------|
 | 3D printer integration | [skills/3dprinter.py](skills/3dprinter.py) drop-in skill with a `PrinterBackend` abstraction → **Prusa** (PrusaLink HTTP API v1, stdlib) + **Bambu** (local MQTT LAN mode, lazy `paho-mqtt`). Backend-agnostic voice layer (normalized status/temps dicts): "how's my print" / "how long left" / "nozzle temp" / "pause/resume/cancel the print" (cancel routes through the yes/no confirmation) / "preheat for PETG" / "cool down". Config in `settings.json` `printer` block; self-gates with spoken guidance when unconfigured. Adding OctoPrint/Klipper = one more subclass + `_BACKENDS` entry. Tests in `tests/test_dispatch.py` (load, routing, backend selection, unconfigured/unknown-type guidance, cancel-confirm) |
 | Command verification (did it actually run?) | `core.response.Verified` wrapper (optimistic message + `check()`/`on_fail`/`retry`/`announce`/`delay`) resolved by [core/verify.py](core/verify.py): waits, checks, **retries once**, reports honestly on failure. Wired into `main.on_command` behind a `verify_commands` feature flag (default on). Verifiers: **app launch** (process appears) with an **adaptive learned per-app delay** in `app_launch_delays.json` — a slow double-launch bumps the wait so it stops double-launching, clean successes trim it, and slow apps get a spoken "this may take a moment"; **app close/kill** (process gone); **window snap** (rect lands in zone ±16px); **printer pause/resume/cancel/preheat/cooldown** (re-query state/targets). Tests: [tests/test_verify.py](tests/test_verify.py) (resolver, delay bump/decay/clamp, printer verifiers with fakes) |
+| YouTube/mpv → skill | Moved YouTube/mpv out of core into self-contained [skills/youtube.py](skills/youtube.py). Entry commands are `PREEMPT` `INTENTS` (new skill-system capability: a skill can opt to run *before* the built-in table, so "open youtube" beats `open_app`); the three former `Mode`-gated dispatchers (`_dispatch_listing`/`_playing`/`_browsing`) are reimplemented via the Converse layer (single `_converse()` routing by `feed`/`list`/`play` state). Core no longer imports `commands.youtube`; `_dispatch_listing` is now web-search-only; `fallback`/`intent_match`/`hot_reload` repointed. Tests updated for the new routing |
+| Persistent window state (app-wide) | Centralized `ui/main.js` `createManagedWindow(name, options)` factory — restores saved size → creates → persists, with persistence logic fully separate from window creation. All 8 resizable panels (app-manager, window-manager, voice-settings, command-editor, programs, memory, reminders, integrations) route through it; a future window gets persistence by just calling the factory. Stored as `settings.json` `windowState[name] = {width,height}` (object → position/maximized/fullscreen later, no migration). `_restoreSize` validates (clamp to work area, enforce minimums, fall back on corrupt/missing — handles monitor changes); save is debounced 400ms on resize + a final save on `close`, skipping maximized/minimized. Orb / directory / tag overlays / corner YouTube window intentionally excluded (positioned/fixed). "Reset size" button in the routing directory's WINDOW LAYOUT section → `reset-window-layout` IPC clears all `windowState` + snaps every open managed window to its default. Reuses shared `_readSettings`/`_writeSettings` (also ui_scale/api_keys). |
+| Integrations & Setup hub (Phase 2b) | "API Keys" panel → data-driven setup hub ([ui/src/integrations](ui/src/integrations)): key cards (Brave/Anthropic/OpenAI, Save/Test/Clear) + tool cards (Ollama/OCR/UIA) with live status pill, setup steps, copyable install command, and guide link. `display._setup_status()` (import checks + off-loop Ollama ping). Directory feature toggles get a "Set up ↗" deep-link (`FEATURE_SETUP` → `openIntegrations(target)` → scroll + highlight). |
+| Visual Navigation Phase 2 — vision cascade | [commands/vision.py](commands/vision.py): VisionProvider is a cheapest-first cascade (OCR/RapidOCR → ONNX-stub → cloud Claude/GPT → Ollama) over one on-demand screenshot, phash-cached. Adds select-by-description (rapidfuzz), numbered coordinate overlay (reuses `identify_windows`), and a data-driven API-Keys panel with Anthropic/OpenAI keys (`vision.test_key` auth ping). Cloud/Ollama need no new dep (urllib). Default backend OCR-only — no GPU. Tests: [tests/test_vision.py](tests/test_vision.py). 2d ONNX detector still pending |
+| Hands-free → Visual Navigation skill (P1, Phase 1) | Moved hands-free mouse control out of core (`commands/handsfree.py` + `Mode.HANDSFREE` + dispatcher hooks all deleted) into optional gated skill [skills/visual_nav.py](skills/visual_nav.py). Adds UIA accessibility tier (`uiautomation`) + numbered element selection ("open number 2") + native input + planner + VisionProvider stub. Modal capture via the Converse layer (no core hook). See the P1 "Visual Navigation skill" entry |
 | Off-switches for auto-behaviors | Added `notifications` + `game_protection` feature flags ([core/features.py](core/features.py) DEFAULTS+LABELS → auto-render as App Manager toggles). `notifications` off → reminders skip the Windows toast (gated in main.py `on_reminder`); `game_protection` off → `essential.active()` returns None so fullscreen auto-detect + protect-list stop deferring focus. Both default on |
 | STT speed+accuracy | `WHISPER_MODEL="auto"` ([config.py](config.py)) → `transcriber._resolve_model()` picks `distil-large-v3` on GPU / `distil-small.en` on CPU (both faster *and* more accurate than the old `small.en`). transcribe() tuned for short commands: `condition_on_previous_text=False` (no cross-command hallucination), `temperature=0.0` (deterministic, fastest decode), VAD filter. Pairs with the GPU device option |
 | Kokoro TTS engine | `core/speaker.py` refactored to a small engine interface (`synth`/`set_params`/`voice_id`); `TTS_ENGINE=piper`(default)/`kokoro`/`auto`. `_KokoroEngine` uses `kokoro-onnx` (no torch) + models in `models/kokoro/`; `_make_engine()` falls back to Piper if Kokoro is requested but unavailable, so TTS never dies. `list_voices()` + `features._compute_status` are engine-aware. Answers the P1 "change TTS tone" item — far more natural than Piper lessac. User step: `pip install kokoro-onnx` + download `kokoro-v1.0.onnx`/`voices-v1.0.bin` |

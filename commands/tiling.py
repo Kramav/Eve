@@ -1,6 +1,7 @@
 import ctypes
 import ctypes.wintypes
 import json
+import re as _re
 from pathlib import Path
 
 from core.response import Verified
@@ -582,6 +583,25 @@ def snap_app(app_name: str, zone_name: str, monitor_ref: str | None = None) -> s
     """
     app_name  = app_name.strip().lower()
     zone_name = zone_name.strip().lower()
+
+    # Dangling preposition / filler caught as a "zone" — usually because speech
+    # detection cut the user off ("snap steam to" → zone='to'). Ask where, and
+    # claim the next utterance as the zone so they don't repeat the whole command.
+    if zone_name in {"", "to", "the", "it", "there", "into", "in", "on", "at"}:
+        from core import session as _sess
+
+        def _finish(reply: str):
+            _sess.clear_converse()
+            reply = reply.strip().lower()
+            if reply in {"never mind", "cancel", "forget it", "stop"}:
+                return "Okay."
+            # Re-run with the spoken zone (strip a leading filler verb if any).
+            reply = _re.sub(r"^(?:to|the|in|on|at|into)\s+", "", reply)
+            return snap_app(app_name, reply, monitor_ref)
+
+        _sess.start_converse(_finish, label=f"snap {app_name}", turns=1, ttl=30.0)
+        return (f"Snap {app_name} where? Say a zone like top, bottom, left, "
+                f"right, or a saved zone name.")
 
     # 1. Eve UI panel? (routing directory, window manager, app manager, voice settings)
     panel_id = _resolve_panel(app_name)

@@ -27,7 +27,6 @@ from core.session import get as _get_session, Mode as _Mode
 from core import features as _features
 from core import verify as _verify
 from commands.reminders import start_checker
-import commands.youtube as _yt_cmd
 import commands.system as _sys_cmd
 import commands.tiling as _tiling_cmd
 import commands.window_manager as _wm_cmd
@@ -51,11 +50,11 @@ def main():
     _prog_cmd.set_display(display)
     _ctx_cmd.set_display(display)
 
-    _yt_cmd.set_display(display)
     _sys_cmd.set_display(display)
     _sys_cmd.set_speaker(speaker)
 
     # Drop-in skills (skills/*.py) — third-party commands without editing core.
+    # The YouTube skill (and any other) gets the Display via its setup(display).
     from core import skills
     skills.load(display)
 

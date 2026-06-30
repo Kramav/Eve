@@ -48,7 +48,7 @@ _SCORER = _ws(fuzz.token_set_ratio)
 def build_catalog() -> list[tuple[str, Callable, tuple]]:
     """Assemble the catalog. Called fresh each dispatch — apps/aliases live in
     files that the user can edit, so we want to pick up changes immediately."""
-    from commands import apps, system, reminders, youtube, tiling, search, window_manager as wm
+    from commands import apps, system, reminders, tiling, search, window_manager as wm
     from commands import windows as windows_cmd
     from core.dispatcher import _HELP_TEXT
 
@@ -134,11 +134,8 @@ def build_catalog() -> list[tuple[str, Callable, tuple]]:
         ('help',                    lambda: _HELP_TEXT,       ()),
     ]
 
-    # ─── YouTube ─────────────────────────────────────────────────────────
-    cat += [
-        ('open youtube',            youtube.browse_home_intent, ()),
-        ('youtube',                 youtube.browse_home_intent, ()),
-    ]
+    # YouTube/mpv lives in skills/youtube.py (PREEMPT) — its entry phrases are
+    # claimed there before the fuzzy catalog is ever consulted, so no entries here.
 
     # ─── Apps from apps.json (open + close, both via spoken name) ────────
     for spoken in apps._load_apps().keys():

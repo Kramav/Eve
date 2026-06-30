@@ -247,19 +247,37 @@ class Display:
 
         # ── API Keys / Integrations panel ────────────────────────────────
         elif action == 'integrations:get':
-            await self._push_one(ws, json.dumps(self._integrations_state()))
-        elif action == 'integrations:set_brave':
-            self._save_api_key('brave', data.get('key', ''))
+            loop = asyncio.get_running_loop()
+            # Off-loop: setup status pings Ollama, so don't block the event loop.
+            payload = await loop.run_in_executor(None, self._integrations_full)
+            await self._push_one(ws, json.dumps(payload))
+        elif action.startswith('integrations:install_'):
+            service = action[len('integrations:install_'):]
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, lambda: self._install_integration(service))
+            await self._push_one(ws, json.dumps({
+                'type':    'integrations_install_result',
+                'service': service,
+                'ok':      bool(res.get('ok')),
+                'message': res.get('message', ''),
+            }))
+            # Refresh the setup pills + the main feature snapshot (status may flip).
+            payload = await loop.run_in_executor(None, self._integrations_full)
+            await self._push_one(ws, json.dumps(payload))
+            self._broadcast()
+        elif action.startswith('integrations:set_'):
+            service = action[len('integrations:set_'):]
+            self._save_api_key(service, data.get('key', ''))
             await self._push_all(json.dumps(self._integrations_state()))
-        elif action == 'integrations:test_brave':
-            from commands import search as _search
+        elif action.startswith('integrations:test_'):
+            service = action[len('integrations:test_'):]
             loop = asyncio.get_running_loop()
             # `key` lets the user test before saving; falls back to stored key.
             key = data.get('key') or None
-            res = await loop.run_in_executor(None, lambda: _search.test_brave_key(key))
+            res = await loop.run_in_executor(None, lambda: self._test_api_key(service, key))
             await self._push_one(ws, json.dumps({
                 'type':    'integrations_test_result',
-                'service': 'brave',
+                'service': service,
                 'ok':      bool(res.get('ok')),
                 'message': res.get('message', ''),
             }))
@@ -379,6 +397,87 @@ class Display:
         except Exception:
             return {}
 
+    # Optional integrations that install cleanly via pip (one-click from the UI).
+    # System installers (Ollama) keep a guide link instead — see the panel.
+    _INSTALLERS = {
+        'rapidocr':     'rapidocr-onnxruntime',
+        'uiautomation': 'uiautomation',
+    }
+
+    def _install_integration(self, service: str) -> dict:
+        """Install an optional integration via pip. Returns {ok, message}."""
+        import subprocess
+        import sys
+        pkg = self._INSTALLERS.get(service)
+        if not pkg:
+            return {'ok': False, 'message': f'No one-click installer for {service} — use the guide.'}
+        try:
+            p = subprocess.run([sys.executable, '-m', 'pip', 'install', pkg],
+                               capture_output=True, text=True, timeout=600)
+        except Exception as e:
+            return {'ok': False, 'message': f'Could not start install: {e}'}
+        if p.returncode == 0:
+            try:
+                from core import features as _features
+                _features.refresh_status()
+            except Exception:
+                pass
+            return {'ok': True, 'message': f'{pkg} installed. Restart Eve if it isn’t detected.'}
+        tail = (p.stderr or p.stdout or '').strip().splitlines()
+        return {'ok': False, 'message': f'Install failed: {tail[-1][:120] if tail else "see console"}'}
+
+    def _integrations_full(self) -> dict:
+        """Key state + setup readiness for tool-based integrations (Ollama, OCR,
+        UI Automation). Used by the Integrations panel's status pills."""
+        state = self._integrations_state()
+        state['setup'] = self._setup_status()
+        return state
+
+    def _setup_status(self) -> dict:
+        """Readiness of optional tool integrations. May do a quick Ollama ping —
+        callers run this off the event loop."""
+        import importlib
+
+        def _installed(mod: str) -> bool:
+            try:
+                importlib.import_module(mod)
+                return True
+            except Exception:
+                return False
+
+        out = {
+            'uiautomation': {'ready': _installed('uiautomation'), 'detail': ''},
+            'rapidocr':     {'ready': _installed('rapidocr_onnxruntime'), 'detail': ''},
+        }
+        ready, detail = False, 'not detected'
+        try:
+            import urllib.request
+            from config import OLLAMA_HOST
+            url = OLLAMA_HOST.rstrip('/') + '/api/tags'
+            with urllib.request.urlopen(url, timeout=1.5) as r:
+                models = (json.loads(r.read()).get('models') or [])
+            ready = True
+            detail = (f"running · {len(models)} model(s)" if models
+                      else "running · no models pulled yet")
+        except Exception:
+            ready, detail = False, 'not detected'
+        out['ollama'] = {'ready': ready, 'detail': detail}
+        return out
+
+    def _test_api_key(self, service: str, key):
+        """Validate a key for the given service. brave → web search; anthropic /
+        openai → cloud vision. Returns {ok, message}."""
+        try:
+            if service == 'brave':
+                from commands import search as _search
+                return _search.test_brave_key(key)
+            if service in ('anthropic', 'openai'):
+                from commands import vision as _vision
+                return _vision.test_key(service, key)
+        except Exception as e:
+            return {'ok': False, 'message': f'Test failed: {e}'}
+        return {'ok': False, 'message': f'No test for {service}.'}
+
     def _save_api_key(self, service: str, key: str):
         """Persist an API key under settings.json -> api_keys.<service>."""
         try:
@@ -400,10 +499,17 @@ class Display:
                 'set':  bool(val),
                 'hint': ('…' + val[-4:]) if len(val) >= 4 else ('set' if val else ''),
             }
-        # Note whether the env var supplies a key even with nothing saved here.
+        # Note whether an env var supplies a key even with nothing saved here.
         if 'brave' not in out:
             from commands.search import brave_key
             out['brave'] = {'set': bool(brave_key()), 'hint': ''}
+        try:
+            from commands.vision import vision_key
+            for svc in ('anthropic', 'openai'):
+                if not out.get(svc, {}).get('set'):
+                    out[svc] = {'set': bool(vision_key(svc)), 'hint': out.get(svc, {}).get('hint', '')}
+        except Exception:
+            pass
         return {'type': 'integrations_state', 'services': out}
 
     def _load_apps(self) -> list:

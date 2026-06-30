@@ -1,6 +1,6 @@
 {
   "tts": true,
-  "youtube": true,
+  "youtube": false,
   "web_search": true,
   "reminders": true,
   "apps": true,
@@ -9,5 +9,6 @@
   "game_protection": true,
   "verify_commands": true,
   "inapp_search": false,
-  "mpv_youtube": false
+  "mpv_youtube": false,
+  "visual_nav": false
 }

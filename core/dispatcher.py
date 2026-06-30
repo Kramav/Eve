@@ -97,8 +97,8 @@ INTENTS = [
     # pre-dispatch block (now deleted; dispatch() is the single router). MUST be
     # above the directory show/hide intents so "show hud" / "hide hud" / bare
     # "hud" all *toggle* the overlay as before, rather than show/hide it.
-    (r"\b(?:show|open|hide|close|toggle)\s+(?:\w+\s+){0,2}?(?:overlay|hud|log|history)\b"
-     r"|^(?:overlay|hud)(?:\s+(?:on|off))?$",                                                system.toggle_overlay),
+    (r"\b(?:show|open|hide|close|toggle)\s+(?:\w+\s+){0,2}?(?:overlay|hud|interface|log|history)\b"
+     r"|^(?:overlay|hud|interface)(?:\s+(?:on|off))?$",                                      system.toggle_overlay),
 
     # Command editor
     (r"(?:open|edit|show|launch) (?:the )?(?:command editor|my commands|eve commands|commands)", system.open_editor),
@@ -208,8 +208,8 @@ INTENTS = [
 
     # Routing directory / overlay / HUD — show & hide the on-screen command list.
     # After move_hud so "move the hud to ..." isn't swallowed by the bare "hud".
-    (r"(?:open|show|display|bring up)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud)", system.show_directory),
-    (r"(?:close|hide|dismiss|quit|exit)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud)", system.hide_directory),
+    (r"(?:open|show|display|bring up)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud|interface)", system.show_directory),
+    (r"(?:close|hide|dismiss|quit|exit)\s+(?:the\s+)?(?:routing\s+directory|directory|overlay|hud|interface)", system.hide_directory),
 
     # Voice Settings — before the generic open/launch app intent so it isn't
     # misrouted to open_app. Includes the bare "voice settings" / "voice manager"

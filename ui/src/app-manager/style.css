@@ -441,6 +441,9 @@ html, body {
   flex-shrink: 0;
 }
 
+#ui-scale { flex: 1; accent-color: var(--accent, #4a9eff); cursor: pointer; }
+#ui-scale-val { flex-shrink: 0; min-width: 38px; text-align: right; }
+
 .display-list {
   display: flex;
   gap: 6px;

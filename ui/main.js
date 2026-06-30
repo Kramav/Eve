@@ -297,7 +297,7 @@ ipcMain.handle('get-displays', () => {
 
 function openAppManager() {
   if (appManagerWin && !appManagerWin.isDestroyed()) { appManagerWin.focus(); return }
-  appManagerWin = new BrowserWindow({
+  appManagerWin = createManagedWindow('app-manager', {
     width: 860, height: 620, minWidth: 640, minHeight: 460,
     title: 'Eve — App Manager', backgroundColor: '#080e18', frame: false, resizable: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
@@ -314,7 +314,7 @@ ipcMain.on('close-app-manager', () => {
 
 function openWindowManager() {
   if (windowManagerWin && !windowManagerWin.isDestroyed()) { windowManagerWin.focus(); return }
-  windowManagerWin = new BrowserWindow({
+  windowManagerWin = createManagedWindow('window-manager', {
     width: 860, height: 680, minWidth: 640, minHeight: 520,
     title: 'Eve — Window Manager', backgroundColor: '#080e18', frame: false, resizable: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
@@ -331,7 +331,7 @@ ipcMain.on('close-window-manager', () => {
 
 function openVoiceSettings() {
   if (voiceSettingsWin && !voiceSettingsWin.isDestroyed()) { voiceSettingsWin.focus(); return }
-  voiceSettingsWin = new BrowserWindow({
+  voiceSettingsWin = createManagedWindow('voice-settings', {
     width: 500, height: 540, minWidth: 420, minHeight: 460,
     title: 'Eve — Voice Settings', backgroundColor: '#080e18', frame: false, resizable: false,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true },
@@ -371,7 +371,7 @@ function openCommandEditor() {
   if (commandEditorWin && !commandEditorWin.isDestroyed()) {
     commandEditorWin.focus(); return
   }
-  commandEditorWin = new BrowserWindow({
+  commandEditorWin = createManagedWindow('command-editor', {
     width: 920, height: 680, minWidth: 720, minHeight: 520,
     title: 'Eve — Command Editor',
     backgroundColor: '#080e18',
@@ -395,7 +395,7 @@ ipcMain.on('close-command-editor', () => {
 
 function openPrograms() {
   if (programsWin && !programsWin.isDestroyed()) { programsWin.focus(); return }
-  programsWin = new BrowserWindow({
+  programsWin = createManagedWindow('programs', {
     width: 640, height: 600, minWidth: 480, minHeight: 380,
     title: 'Eve — Running Programs',
     backgroundColor: '#080e18',
@@ -419,7 +419,7 @@ ipcMain.on('close-programs', () => {
 
 function openMemory() {
   if (memoryWin && !memoryWin.isDestroyed()) { memoryWin.focus(); return }
-  memoryWin = new BrowserWindow({
+  memoryWin = createManagedWindow('memory', {
     width: 560, height: 520, minWidth: 460, minHeight: 360,
     title: 'Eve — Memory',
     backgroundColor: '#080e18',
@@ -443,7 +443,7 @@ ipcMain.on('close-memory', () => {
 
 function openReminders() {
   if (remindersWin && !remindersWin.isDestroyed()) { remindersWin.focus(); return }
-  remindersWin = new BrowserWindow({
+  remindersWin = createManagedWindow('reminders', {
     width: 600, height: 520, minWidth: 500, minHeight: 360,
     title: 'Eve — Reminders',
     backgroundColor: '#080e18',
@@ -578,11 +578,16 @@ ipcMain.on('close-youtube', () => {
 
 // ── API Keys / Integrations panel ──────────────────────────────────────────────
 
-function openIntegrations() {
-  if (integrationsWin && !integrationsWin.isDestroyed()) { integrationsWin.focus(); return }
-  integrationsWin = new BrowserWindow({
+function openIntegrations(target) {
+  // `target` (optional) deep-links to a specific integration card via #hash.
+  if (integrationsWin && !integrationsWin.isDestroyed()) {
+    integrationsWin.focus()
+    if (target) integrationsWin.webContents.send('scroll-to', target)
+    return
+  }
+  integrationsWin = createManagedWindow('integrations', {
     width: 520, height: 380, minWidth: 460, minHeight: 320,
-    title: 'Eve — API Keys',
+    title: 'Eve — Integrations',
     backgroundColor: '#080e18',
     frame: false, resizable: true,
     webPreferences: {
@@ -591,11 +596,12 @@ function openIntegrations() {
     },
   })
   integrationsWin.setMenuBarVisibility(false)
-  integrationsWin.loadFile(path.join(__dirname, 'src', 'integrations', 'index.html'))
+  integrationsWin.loadFile(path.join(__dirname, 'src', 'integrations', 'index.html'),
+                           target ? { hash: target } : undefined)
   integrationsWin.on('closed', () => { integrationsWin = null })
 }
 
-ipcMain.on('open-integrations',  openIntegrations)
+ipcMain.on('open-integrations',  (_e, target) => openIntegrations(target))
 ipcMain.on('close-integrations', () => {
   if (integrationsWin && !integrationsWin.isDestroyed()) integrationsWin.close()
 })
@@ -1016,7 +1022,147 @@ function broadcastDisplayChange() {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
+// ── settings.json helpers (shared store — also used for api_keys, ui_scale) ──
+function _settingsFile() { return path.join(__dirname, '..', 'settings.json') }
+function _readSettings() {
+  try { return JSON.parse(fs.readFileSync(_settingsFile(), 'utf8')) } catch (_) { return {} }
+}
+function _writeSettings(s) {
+  try { fs.writeFileSync(_settingsFile(), JSON.stringify(s, null, 2)) } catch (_) {}
+}
+
+// ── Persistent window state (app-wide, centralized) ──────────────────────────
+// Every resizable window is created via createManagedWindow(name, options); it
+// restores the saved size, then persists future resizes — no per-window code.
+// Stored as settings.json -> windowState[name] = { width, height }. The value is
+// an object so position / maximized / fullscreen can be added later, and the
+// persistence logic is fully separate from window creation.
+const _managed = new Map()   // name -> { win, def } for open managed windows
+
+// Validated saved size for `def`, or the default. Clamps to the current display
+// work area (handles monitor changes) and the window's minimums; corrupt /
+// out-of-range / missing values fall back to the default.
+function _restoreSize(def, name) {
+  const b = (_readSettings().windowState || {})[name]
+  if (b && Number.isFinite(b.width) && Number.isFinite(b.height)) {
+    let { width, height } = b
+    try {
+      const wa = screen.getPrimaryDisplay().workAreaSize
+      width = Math.min(Math.round(width), wa.width)
+      height = Math.min(Math.round(height), wa.height)
+    } catch (_) {}
+    if (width >= def.minW && height >= def.minH) return { width, height }
+  }
+  return { width: def.width, height: def.height }
+}
+
+function _saveWindowState(name, win) {
+  // Don't capture a maximized/minimized size as the restore size.
+  if (win.isDestroyed() || win.isMaximized() || win.isMinimized()) return
+  const [width, height] = win.getSize()
+  const s = _readSettings()
+  s.windowState = s.windowState || {}
+  s.windowState[name] = { width, height }
+  _writeSettings(s)
+}
+
+// Centralized factory: restore size → create → persist (debounced + on close).
+// Skips persistence for non-resizable windows (orb, overlays, tag windows).
+function createManagedWindow(name, options) {
+  const def = {
+    width:  options.width, height: options.height,
+    minW:   options.minWidth  || 0, minH: options.minHeight || 0,
+  }
+  const persist = options.resizable !== false
+  const dims = persist ? _restoreSize(def, name) : { width: def.width, height: def.height }
+  const win = new BrowserWindow({ ...options, width: dims.width, height: dims.height })
+  if (persist) {
+    _managed.set(name, { win, def })
+    let t = null
+    win.on('resize', () => {           // debounced: write only after resize settles
+      clearTimeout(t); t = setTimeout(() => _saveWindowState(name, win), 400)
+    })
+    win.on('close', () => {            // final safeguard before teardown
+      clearTimeout(t); _saveWindowState(name, win)
+    })
+    win.on('closed', () => { if (_managed.get(name)?.win === win) _managed.delete(name) })
+  }
+  return win
+}
+
+// "Reset Window Layout": clear all saved state + snap open managed windows back.
+function _resetWindowLayout() {
+  const s = _readSettings()
+  if (s.windowState) { delete s.windowState; _writeSettings(s) }
+  for (const { win, def } of _managed.values()) {
+    if (win && !win.isDestroyed()) {
+      if (win.isMaximized()) win.unmaximize()
+      win.setSize(def.width, def.height)
+      win.center()
+    }
+  }
+}
+ipcMain.on('reset-window-layout', _resetWindowLayout)
+
+// ── UI scaling for high-res displays (1440p / 4K) ───────────────────────────
+// Panels use fixed px sizing tuned for ~1080p; on a 1440p/4K monitor we zoom the
+// whole panel (text + controls). The orb, directory, and positioned tag overlays
+// are NOT zoomed — their geometry is computed, not content-scaled.
+const _PANEL_FOLDERS = new Set([
+  'app-manager', 'window-manager', 'voice-settings', 'command-editor',
+  'programs', 'memory', 'reminders', 'integrations',
+])
+let _uiScale = 1.0
+
+function _autoUiScale() {
+  try {
+    const w = screen.getPrimaryDisplay().size.width
+    if (w >= 3840) return 1.5      // 4K
+    if (w >= 2560) return 1.25     // 1440p
+  } catch (_) {}
+  return 1.0
+}
+
+function _readUiScale() {
+  const v = Number(_readSettings().ui_scale)
+  if (v && v > 0) return Math.min(2.0, Math.max(0.8, v))     // explicit override
+  return _autoUiScale()
+}
+
+function _persistUiScale(v) {
+  const s = _readSettings()
+  s.ui_scale = v
+  _writeSettings(s)
+}
+
+function _panelOf(contents) {
+  const m = (contents.getURL() || '').match(/\/src\/([^/]+)\/index\.html/)
+  return m && _PANEL_FOLDERS.has(m[1]) ? m[1] : null
+}
+
+function _applyUiScaleToOpenPanels() {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try { if (_panelOf(win.webContents)) win.webContents.setZoomFactor(_uiScale) } catch (_) {}
+  }
+}
+
+// Zoom each panel as it finishes loading. Global hook → covers every panel,
+// current and future, without editing each open* function.
+app.on('web-contents-created', (_e, contents) => {
+  contents.on('did-finish-load', () => {
+    try { if (_panelOf(contents)) contents.setZoomFactor(_uiScale) } catch (_) {}
+  })
+})
+
+ipcMain.handle('get-ui-scale', () => _uiScale)
+ipcMain.on('set-ui-scale', (_e, v) => {
+  _uiScale = Math.min(2.0, Math.max(0.8, Number(v) || 1.0))
+  _persistUiScale(_uiScale)
+  _applyUiScaleToOpenPanels()
+})
+
 app.whenReady().then(() => {
+  _uiScale = _readUiScale()      // screen is available now → auto-scale works
   createOrbWin()
   createDirWin()   // pre-warm: content loads in background before first open
   createTray()
