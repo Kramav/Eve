@@ -2,7 +2,7 @@ import json
 import re
 import subprocess
 from pathlib import Path
-from commands import apps, system, search, reminders, youtube, tiling, window_manager as wm
+from commands import apps, system, search, reminders, tiling, window_manager as wm
 from commands import windows as windows_cmd
 from commands import programs as programs_cmd
 from commands import discord as discord_cmd
@@ -234,17 +234,7 @@ INTENTS = [
     # Help
     (r"help|what can (?:you|eve) do|list commands|show commands", _help),
 
-    # YouTube — before apps and web search to prevent misrouting
-    # "open youtube" / "show youtube" must not fall through to open_app
-    # "search youtube" must not fall through to web_search
-
-    # Feed browsing in the HUD browser — MUST precede the browser-home intent so
-    # "browse youtube" / "open the youtube feed" enters BROWSING mode.
-    (r"(?:browse|open|show)\s+(?:the\s+)?youtube\s+feed|^browse\s+youtube$", youtube.browse_feed_intent),
-    (r"(?:open|launch|browse|show(?: me)?) (?:youtube|yt)(?:\s+home(?:page)?)?|^youtube$", youtube.browse_home_intent),
-    (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",             youtube.play_or_search),
-    # \b prevents matching "play" inside "display", "watch" inside "watchful", etc.
-    (r"\b(?:play|watch)\s+(.+)",                                  youtube.play_or_search),
+    # YouTube/mpv lives in skills/youtube.py (PREEMPT), tried before this table.
 
     # Auto-snap on launch — persist a default zone for an app. MUST come before
     # the snap patterns (so "auto snap discord to right" assigns rather than
@@ -422,8 +412,6 @@ INTENTS[_WEB_SEARCH_IDX:_WEB_SEARCH_IDX] = _BARE_ZORDER_INTENTS
 # feature is OFF (or unavailable), the match is treated as if it never fired
 # and dispatch continues to the next pattern.
 _HANDLER_FEATURE = {
-    youtube.browse_home_intent: 'youtube',
-    youtube.play_query_intent:  'youtube',
     search.go_to_site:          'web_search',
     search.web_search_list:     'web_search',
     reminders.set_reminder:     'reminders',
@@ -483,122 +471,12 @@ def _dispatch_site_listing(text: str):
 
 
 def _dispatch_listing(text: str):
-    """Handle commands when a list is displayed — routes to site or video logic."""
-    from core.response import Silent
+    """Handle selection commands when a web-search result list is displayed.
+    (YouTube's own list/playback follow-ups live in skills/youtube.py via the
+    converse layer.)"""
     sess = _sess_mod.get()
-
-    # Route to web search selection if a site list is active
     if sess.site_list:
         return _dispatch_site_listing(text)
-
-    # ── YouTube video list ──────────────────────────────────────────────────
-
-    # "play number N" / "select 3" / "open the 2nd"
-    m = re.search(r"(?:play|open|select|choose|pick)\s+(?:the\s+)?(?:number\s+)?(\d+)", text)
-    if m:
-        return youtube.select_by_index(int(m.group(1)))
-
-    # bare digit: "2" / "number 2"
-    m = re.search(r"(?:^|number\s+)(\d+)$", text)
-    if m:
-        return youtube.select_by_index(int(m.group(1)))
-
-    # ordinal words: "the third one", "second"
-    for word, n in _ORDINALS.items():
-        if re.search(rf"\b{word}\b", text):
-            return youtube.select_by_index(n)
-
-    # read the list aloud
-    if re.search(r"read (?:the list|them|it|those)|read (?:it )?(?:again|back)", text):
-        return youtube.read_list()
-
-    # title match: "play [partial title]"
-    m = re.search(r"(?:play|watch|open)\s+(.+)", text)
-    if m:
-        result = youtube.select_by_title(m.group(1))
-        if result:
-            return result
-
-    # cancel / exit list
-    if re.search(r"\b(?:cancel|never mind|forget it|exit|close|stop)\b", text):
-        _sess_mod.reset()
-        return Silent("List closed")
-
-    return None  # fall through to normal dispatch
-
-
-def _dispatch_playing(text: str):
-    """Handle commands when a video is playing."""
-    from core.response import VideoList
-
-    # Skip ahead N seconds
-    m = re.search(r"skip (?:ahead\s+)?(\d+)\s+seconds?", text)
-    if m:
-        return youtube.skip_seconds(int(m.group(1)))
-
-    # Go back N seconds
-    m = re.search(r"(?:go )?back (\d+)\s+seconds?", text)
-    if m:
-        return youtube.back_seconds(int(m.group(1)))
-
-    if re.search(r"skip (?:ahead|forward)", text):
-        return youtube.playback_control("skip ahead")
-    if re.search(r"go back|rewind", text):
-        return youtube.playback_control("go back")
-    if re.search(r"\b(?:pause|resume)\b", text):
-        return youtube.playback_control("pause")
-    if re.search(r"\b(?:mute|unmute)\b", text):
-        return youtube.playback_control("mute")
-    if re.search(r"next (?:video|one)", text):
-        return youtube.playback_control("next")
-    if re.search(r"full ?screen", text):
-        return youtube.playback_control("fullscreen")
-    if re.search(r"(?:back to list|show list|show videos)", text):
-        sess = _sess_mod.get()
-        sess.mode = Mode.LISTING
-        return VideoList(sess.video_list, message="Video list")
-    if re.search(r"close youtube|stop youtube|exit youtube", text):
-        return youtube.close_youtube()
-
-    return None  # fall through to normal dispatch
-
-
-def _dispatch_browsing(text: str):
-    """Handle commands while the YouTube HUD browser is open (Mode.BROWSING)."""
-    # In-page search: "search youtube for X" / "search for X" / "find X"
-    m = re.search(r"(?:search(?:\s+(?:youtube|yt))?(?:\s+for)?|find|look\s+up)\s+(.+)", text)
-    if m:
-        return youtube.feed_search(m.group(1).strip())
-
-    # Scrolling
-    if re.search(r"scroll\s+(?:to\s+(?:the\s+)?top|up\s+top|all\s+the\s+way\s+up)|back\s+to\s+top", text):
-        return youtube.feed_scroll("top")
-    if re.search(r"scroll\s+up|go\s+up|page\s+up", text):
-        return youtube.feed_scroll("up")
-    if re.search(r"scroll(?:\s+down)?|go\s+down|page\s+down|more", text):
-        return youtube.feed_scroll("down")
-
-    # Number the visible tiles
-    if re.search(r"(?:show|label)\s+(?:the\s+)?numbers?|number\s+(?:them|videos|the\s+videos)", text):
-        return youtube.feed_number()
-
-    # Open by number / ordinal: "open video 3", "play number 2", "the second one"
-    m = re.search(r"(?:open|play|watch|select|pick)\s+(?:video\s+|number\s+)?(\d+)", text)
-    if m:
-        return youtube.feed_open(int(m.group(1)))
-    m = re.search(r"^(?:number\s+)?(\d+)$", text)
-    if m:
-        return youtube.feed_open(int(m.group(1)))
-    for word, n in _ORDINALS.items():
-        if re.search(rf"\b{word}\b", text):
-            return youtube.feed_open(n)
-
-    # Playback + exit
-    if re.search(r"\b(?:pause|resume|play|stop)\b", text):
-        return youtube.feed_playpause()
-    if re.search(r"close\s+youtube|stop\s+youtube|exit\s+youtube|close\s+the\s+feed", text):
-        return youtube.feed_close()
-
     return None  # fall through to normal dispatch
 
 
@@ -835,17 +713,10 @@ def dispatch(text: str):
 
     # --- State-aware routing ---
     sess = _sess_mod.get()
-    # LISTING covers both mpv video lists and in-app web-search site lists.
-    if sess.mode == Mode.LISTING and (_features.get('mpv_youtube') or _features.get('inapp_search')):
+    # In-app web-search result lists; YouTube's own list/playback follow-ups are
+    # handled by skills/youtube.py via the converse layer above.
+    if sess.mode == Mode.LISTING and _features.get('inapp_search'):
         result = _dispatch_listing(text)
-        if result is not None:
-            return result
-    elif sess.mode == Mode.PLAYING and _features.get('mpv_youtube'):
-        result = _dispatch_playing(text)
-        if result is not None:
-            return result
-    elif sess.mode == Mode.BROWSING and _features.get('youtube'):
-        result = _dispatch_browsing(text)
         if result is not None:
             return result
 
@@ -862,6 +733,16 @@ def dispatch(text: str):
             if handler:
                 return handler()
 
+    # PREEMPT skills (skills/*.py with PREEMPT=True) run just BEFORE the built-in
+    # table so they can own phrases the built-ins would otherwise claim — e.g.
+    # YouTube's "open youtube" beating the app launcher's "open X". Placed here
+    # (after custom commands/aliases) to keep the priority the in-table YouTube
+    # intents used to have.
+    from core import skills
+    pre = skills.dispatch_preempt(text)
+    if pre is not None:
+        return pre
+
     # Built-in intents
     for pattern, handler in INTENTS:
         m = re.search(pattern, text)
@@ -871,7 +752,6 @@ def dispatch(text: str):
 
     # Drop-in skills (skills/*.py) — extend the built-ins without editing core.
     # Tried after built-ins so they add commands rather than override them.
-    from core import skills
     skill_result = skills.dispatch(text)
     if skill_result is not None:
         return skill_result

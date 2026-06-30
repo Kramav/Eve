@@ -97,10 +97,118 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 
 ---
 
+## Skill Library — candidate drop-in skills
+
+Day-to-day skills worth shipping. **Every item below is implementable as a
+`skills/*.py` drop-in** (module-level `INTENTS`, optional `PRIORITY`/`FEATURE`/
+`setup`) with **no core changes** — same shape as [skills/example_dice.py](skills/example_dice.py)
+and [skills/3dprinter.py](skills/3dprinter.py). Conventions for all of them:
+gate anything heavy or keyed on a `FEATURE` flag; resolve API keys via the
+existing API-Keys UI (`settings.json` `api_keys` → env-var fallback, masked hint
+back to the panel); keep network calls stdlib `urllib` + bounded timeouts; for
+local-hardware integrations mirror the 3D-printer **backend abstraction**
+(normalized dicts, graceful "not configured" speech, lazy-import optional deps).
+Side-effecting ones should return `core.response.Verified` so the new command
+verification confirms they actually took. Tiered by daily value × low friction.
+
+### Tier A — high daily value, no new dependencies (build first)
+- **Media & volume control** — "pause" / "next track" / "previous" / "volume up" /
+  "set volume to 30" / "mute". `keybd_event` media keys + `IAudioEndpointVolume`
+  (ctypes COM). Bare "mute" already exists for system mute — extend, don't clash.
+- **System power / session** — "lock my screen" / "sleep" / "restart [in 10 minutes]" /
+  "sign out" / "shut down". `user32.LockWorkStation`, `SetSuspendState`,
+  `shutdown.exe`. Destructive ones return `Verified`/confirm first.
+- **Calculator + unit/currency/tip convert** — "what's 15% of 240" / "convert 5
+  miles to km" / "how many cups in 2 liters" / "tip on 80 dollars". Local parse,
+  no deps (currency rates optional via a free API, cached).
+- **Window quick-actions** — "minimize all" / "show desktop" / "minimize this" /
+  "maximize this" / "always on top". Complements tiling; `ShowWindow` + shell COM.
+- **Virtual desktops** — "new desktop" / "switch to desktop 2" / "move this to
+  desktop 2". `IVirtualDesktopManager` COM (or `Win+Ctrl+←/→` key injection).
+- **Battery & system status** — "how much battery" / "am I charging" / "how's my
+  memory" / "disk space" / "how long has my PC been on". `GetSystemPowerStatus`,
+  `GlobalMemoryStatusEx`, `GetDiskFreeSpaceEx`, `GetTickCount64` — all ctypes.
+- **Open Windows settings** — "open bluetooth settings" / "display settings" /
+  "sound settings". `ms-settings:` URIs via `ShellExecute`; natural extension of
+  the app launcher.
+- **Quick notes + read clipboard** — "take a note: buy milk" / "read my clipboard" /
+  "what's on my clipboard". Append to a notes file; speak clipboard via existing
+  TTS (`win32clipboard`/ctypes).
+- **Screenshot / window capture** — "take a screenshot" / "screenshot this window".
+  Saves to `config.SCREENSHOT_DIR` (already defined); `PrintWindow`/`BitBlt` or a
+  PowerShell one-liner like the toast helper.
+
+### Tier B — high value, free API or no key
+- **Weather** ⭐ — "what's the weather" / "will it rain today" / "forecast for
+  tomorrow". **Open-Meteo needs no key**; geocode once from a configured city.
+  Highest value-per-effort of the keyed-ish group.
+- **Dictionary / spell / thesaurus** — "define ephemeral" / "spell accommodate" /
+  "synonym for happy". `dictionaryapi.dev`, no key.
+- **World clock / countdown** — "what time is it in Tokyo" / "how many days until
+  Christmas". Local tz math (`zoneinfo`), no deps.
+- **News headlines** — "what's in the news" / "tech headlines". RSS pull (stdlib),
+  no key; reuses the clickable-results list UI.
+- **Translate** — "how do you say good morning in Spanish". LibreTranslate
+  (self-host/free) or local Argos; gate on `FEATURE`.
+
+### Tier C — local smart-home / IoT (mirror the 3D-printer backend pattern)
+- **Smart lights** — "turn off the living room lights" / "dim to 40%". Philips Hue
+  (local bridge REST), LIFX (LAN UDP), Nanoleaf — each a backend behind one
+  abstraction, like the printer's Prusa/Bambu split.
+- **Home Assistant bridge** — "turn on the fan" / "is the front door locked".
+  Local HA REST API + long-lived token; one skill covers any HA-exposed device.
+- **Spotify control** — "play my Discover Weekly" / "what's this song". Spotify Web
+  API (needs OAuth/key via the API-Keys panel); generic media keys cover basic
+  play/pause without it.
+
+### Tier D — productivity & lists (build on reminders/converse/memory)
+- **TODO / shopping list** — "add milk to my shopping list" / "what's on my list" /
+  "clear my list". Mirrors the Memory panel (list-shaped store + directory tile).
+- **Pomodoro / focus sessions** — "start a pomodoro" / "start a 25-minute focus
+  session". Cycles work/break on the existing reminder scheduler.
+- **Daily briefing** — "good morning" → composite: weather + today's reminders +
+  headlines in one spoken summary.
+- **Habit / streak tracker** — "did I work out today" / "mark meditation done".
+- **Email compose** — "email John about the meeting". `mailto:` opens the default
+  client prefilled (no OAuth, light); full send is out of scope.
+- **Do-not-disturb / Focus Assist** — "turn on do not disturb". Toggles Windows
+  Focus Assist; pairs with the existing `notifications` flag.
+
+### Tier E — utilities & fun (small, delightful, cheap)
+- **Random / decisions** — "flip a coin" (example covers dice) / "pick a number 1
+  to 100" / "pick between pizza and sushi" / "magic 8 ball".
+- **Password / QR generator** — "generate a password" / "make a QR code for this
+  link" (QR needs a tiny lib or a no-dep PNG writer).
+- **Clipboard transforms** — "uppercase my clipboard" / "pretty-print this JSON" /
+  "base64 encode this".
+- **Phonetic spelling** — "spell that in the NATO alphabet".
+- **Network utilities** — "what's my IP" / "am I online" / "flush DNS" / "toggle
+  wifi" / "toggle bluetooth". stdlib + `ipconfig`/`netsh`.
+- **App updates** — "update my apps" / "check for updates" via `winget upgrade`.
+- **Cleanup** — "empty the recycle bin" / "clear my downloads folder" (confirm
+  first; `Verified`).
+- **What's using my CPU** — top process by CPU/RAM (`GetProcessTimes` or
+  `tasklist`).
+- **Find files / recent docs** — "find my resume" / "open my recent documents".
+- **Dictation mode** — "start dictation" types spoken words into the focused field
+  (uses the existing STT loop + `SendInput`); "stop dictation" ends it.
+- **Read selection / summarize** — "read this aloud" / "summarize my clipboard"
+  (the latter via the Ollama fallback that already exists).
+- **Jokes / quote of the day** — local list or a no-key API; pure delight.
+
+> Suggested first batch (max value, zero/near-zero friction): **media & volume**,
+> **weather**, **system power/lock**, **calculator/convert**. Each is a standalone
+> drop-in and a good template to seed outside contributors. A "recommended skills"
+> index in [skills/README.md](skills/README.md) would help that along.
+
+---
+
 ## Completed (reference)
 
 | Feature | Notes |
 |---------|-------|
+| 3D printer integration | [skills/3dprinter.py](skills/3dprinter.py) drop-in skill with a `PrinterBackend` abstraction → **Prusa** (PrusaLink HTTP API v1, stdlib) + **Bambu** (local MQTT LAN mode, lazy `paho-mqtt`). Backend-agnostic voice layer (normalized status/temps dicts): "how's my print" / "how long left" / "nozzle temp" / "pause/resume/cancel the print" (cancel routes through the yes/no confirmation) / "preheat for PETG" / "cool down". Config in `settings.json` `printer` block; self-gates with spoken guidance when unconfigured. Adding OctoPrint/Klipper = one more subclass + `_BACKENDS` entry. Tests in `tests/test_dispatch.py` (load, routing, backend selection, unconfigured/unknown-type guidance, cancel-confirm) |
+| Command verification (did it actually run?) | `core.response.Verified` wrapper (optimistic message + `check()`/`on_fail`/`retry`/`announce`/`delay`) resolved by [core/verify.py](core/verify.py): waits, checks, **retries once**, reports honestly on failure. Wired into `main.on_command` behind a `verify_commands` feature flag (default on). Verifiers: **app launch** (process appears) with an **adaptive learned per-app delay** in `app_launch_delays.json` — a slow double-launch bumps the wait so it stops double-launching, clean successes trim it, and slow apps get a spoken "this may take a moment"; **app close/kill** (process gone); **window snap** (rect lands in zone ±16px); **printer pause/resume/cancel/preheat/cooldown** (re-query state/targets). Tests: [tests/test_verify.py](tests/test_verify.py) (resolver, delay bump/decay/clamp, printer verifiers with fakes) |
 | Off-switches for auto-behaviors | Added `notifications` + `game_protection` feature flags ([core/features.py](core/features.py) DEFAULTS+LABELS → auto-render as App Manager toggles). `notifications` off → reminders skip the Windows toast (gated in main.py `on_reminder`); `game_protection` off → `essential.active()` returns None so fullscreen auto-detect + protect-list stop deferring focus. Both default on |
 | STT speed+accuracy | `WHISPER_MODEL="auto"` ([config.py](config.py)) → `transcriber._resolve_model()` picks `distil-large-v3` on GPU / `distil-small.en` on CPU (both faster *and* more accurate than the old `small.en`). transcribe() tuned for short commands: `condition_on_previous_text=False` (no cross-command hallucination), `temperature=0.0` (deterministic, fastest decode), VAD filter. Pairs with the GPU device option |
 | Kokoro TTS engine | `core/speaker.py` refactored to a small engine interface (`synth`/`set_params`/`voice_id`); `TTS_ENGINE=piper`(default)/`kokoro`/`auto`. `_KokoroEngine` uses `kokoro-onnx` (no torch) + models in `models/kokoro/`; `_make_engine()` falls back to Piper if Kokoro is requested but unavailable, so TTS never dies. `list_voices()` + `features._compute_status` are engine-aware. Answers the P1 "change TTS tone" item — far more natural than Piper lessac. User step: `pip install kokoro-onnx` + download `kokoro-v1.0.onnx`/`voices-v1.0.bin` |
