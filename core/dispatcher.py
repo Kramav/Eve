@@ -684,6 +684,22 @@ def _handle_converse(text: str):
     return result
 
 
+# Built-in intents wrapped once in the scored registry (Tier A). Replaces the
+# old "list position encodes priority" first-match loop with priority +
+# literal-match specificity — order-independent. Built lazily so it captures
+# INTENTS *after* the bare-z-order splice at import. Behaviour is identical to
+# the old loop (no feature gating here, matching prior behaviour); proven by
+# tests/test_intent_registry_parity.py. To start gating built-ins, pass
+# feature_get=_features.get to .best() — a deliberate, separate change.
+_REGISTRY = None
+def _registry():
+    global _REGISTRY
+    if _REGISTRY is None:
+        from core.intent_registry import from_intents
+        _REGISTRY = from_intents(INTENTS, _HANDLER_FEATURE)
+    return _REGISTRY
+
+
 def dispatch(text: str):
     text = text.strip().lower()
     text = re.sub(r"[.,!?]+$", "", text).strip()  # strip trailing punctuation Whisper adds
@@ -743,12 +759,13 @@ def dispatch(text: str):
     if pre is not None:
         return pre
 
-    # Built-in intents
-    for pattern, handler in INTENTS:
-        m = re.search(pattern, text)
-        if m:
-            groups = m.groups()
-            return handler(*groups) if groups else handler()
+    # Built-in intents — resolved via the scored registry (order-independent).
+    # Behaviour-identical to the old first-match loop; see test_intent_registry_parity.
+    hit = _registry().best(text)
+    if hit is not None:
+        _intent, m = hit
+        groups = m.groups()
+        return _intent.handler(*groups) if groups else _intent.handler()
 
     # Drop-in skills (skills/*.py) — extend the built-ins without editing core.
     # Tried after built-ins so they add commands rather than override them.
