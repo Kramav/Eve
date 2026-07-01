@@ -139,6 +139,14 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
     claim the same canonical phrase" self-check (the guard #3 already wants). Slots stay regex (what
     regex is good at). Deterministic; guarded by the existing `tests/test_dispatch.py`. **Caveat:**
     highest blast-radius change in the repo — do it incrementally behind the routing tests.
+    **Core landed (standalone, not yet wired):** [core/intent_registry.py](core/intent_registry.py) —
+    `Intent` dataclass (patterns + priority + feature + slots + learning metadata: source/confidence/
+    successes/failures/provenance) and `IntentRegistry` with a scored matcher (priority desc → fewest
+    wildcard-captured chars, i.e. most literal → stable order). [tests/test_intent_registry.py](tests/test_intent_registry.py)
+    proves routing is **registration-order-independent** (panel beats `open_app` first- or last-added),
+    resolves the audit's "snap X to top" case by literal-match specificity, and covers feature gating +
+    the learning counters. **Remaining:** migrate the ~50 built-in `INTENTS` into registry entries and
+    swap `dispatch()`'s first-match loop for `registry.resolve()`, behind test_dispatch + test_intent_audit.
   - **Tier B — local semantic fallback (opt-in, CPU).** Swap the fuzzy tier (`core/intent_match.py`,
     lexical rapidfuzz `token_set_ratio`) for a local sentence-embedding classifier (MiniLM via
     `onnxruntime`, ~80MB, CPU-ms — reuses the vision stack's optional onnxruntime dep). Embeds the
