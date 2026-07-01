@@ -95,6 +95,18 @@ def test_explain_last_after_dispatch():
     S.reset()
 
 
+def test_why_did_you_do_that_explains_previous_not_itself():
+    # The voice "why did you do that" intent must explain the PRIOR command,
+    # not overwrite _LAST_TEXT with the query itself.
+    from core import session as S
+    S.reset()
+    d.dispatch("what time is it")
+    out = str(d.dispatch("why did you do that"))
+    assert "get_time" in out, out                  # explains the time command
+    assert "why did you do that" not in out        # not the meta-query
+    S.reset()
+
+
 def test_bridge_preserves_priority_order():
     # Position → strictly descending priority, so the sort is exactly list order.
     reg = from_intents(d.INTENTS)

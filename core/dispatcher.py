@@ -89,6 +89,9 @@ def _snap_monitor_only(app, monitor):       return tiling.snap_app(app, 'full', 
 # "move hud to top-left of monitor 1" — snap the directory panel into a named
 # zone on a specific monitor (the 'move' verb otherwise just relocates the orb).
 def _snap_hud_zone_monitor(zone, monitor):  return tiling.snap_app('hud', zone, monitor)
+# Voice "why did you do that" → explain the PREVIOUS built-in routing. Defined
+# here (before INTENTS) so the table can reference it; explain_last() below.
+def _explain_last_intent():                 return explain_last()
 
 
 # (regex pattern, handler) — first match wins, captured groups passed as args
@@ -111,6 +114,11 @@ INTENTS = [
     (r"kill (?:the )?window manager",                           system.close_window_manager),
 
     # ── Non-specific follow-ups (must come before snap / open_app) ────────
+    # Intent Explanation — "why did you do that" explains the previous routing.
+    (r"\bwhy\s+(?:did|do)\s+(?:you|eve)\s+(?:do|say|pick|choose|route)\s+that\b"
+     r"|\bwhy\s+that\s+(?:command|one|action|routing)\b"
+     r"|\bexplain\s+(?:that|your\s+(?:choice|routing|last\s+(?:command|routing)))\b"
+     r"|\bhow\s+did\s+you\s+(?:understand|interpret)\s+that\b",                            _explain_last_intent),
     (r"\b(?:go\s+back|undo(?:\s+that)?|revert(?:\s+that)?)\b",                             ctx_cmd.undo),
     (r"\bclose\s+(?:that(?:\s+window)?|it|the\s+(?:last\s+)?window)\b",                    ctx_cmd.close_last),
     (r"\bcancel\s+(?:that|it|the\s+last\s+(?:one|thing))\b",                               ctx_cmd.cancel_last),
@@ -774,11 +782,14 @@ def dispatch(text: str):
 
     # Built-in intents — resolved via the scored registry (order-independent).
     # Behaviour-identical to the old first-match loop; see test_intent_registry_parity.
-    global _LAST_TEXT
-    _LAST_TEXT = text
     hit = _registry().best(text)
     if hit is not None:
         _intent, m = hit
+        # Record for explain_last(), but never let the "why did you do that"
+        # query overwrite the command it's asking about.
+        if _intent.handler is not _explain_last_intent:
+            global _LAST_TEXT
+            _LAST_TEXT = text
         groups = m.groups()
         return _intent.handler(*groups) if groups else _intent.handler()
 

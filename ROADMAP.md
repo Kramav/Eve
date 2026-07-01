@@ -210,7 +210,9 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
     metadata; `dispatcher.explain_last()` records the last built-in-routed text so a spoken "why did you do
     that" can explain it. Tests in [tests/test_intent_registry.py](tests/test_intent_registry.py) +
     an integration check in [tests/test_intent_registry_parity.py](tests/test_intent_registry_parity.py).
-    **Remaining:** a voice intent that calls `explain_last()`, and extending it to learned mappings once they exist.
+    **Voice command landed:** "why did you do that" / "explain that" / "how did you interpret that" →
+    `_explain_last_intent` → `explain_last()`, explaining the *previous* routing (guarded so the meta-query
+    never overwrites the command it asks about). **Remaining:** extend explanation to learned mappings once they exist.
   - **Reuse anchors:** Tier-A registry (**learned intents are just data added at runtime — this is why Tier A
     is a hard prerequisite**); Tier-B embeddings (the Intent Clustering engine that dedupes semantically
     identical learned phrases); [commands/fallback.py](commands/fallback.py) (LLM Fallback Engine — already
