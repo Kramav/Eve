@@ -111,3 +111,29 @@ class IntentRegistry:
         it, m = hit
         groups = m.groups()
         return it, (it.handler(*groups) if groups else it.handler())
+
+
+def from_intents(intents, feature_map=None) -> "IntentRegistry":
+    """Migration bridge: build a registry from a first-match-ordered
+    ``[(regex, handler)]`` list (i.e. core.dispatcher.INTENTS), *preserving its
+    semantics exactly* — earlier entries get strictly higher priority, so the
+    registry's best-match == the list's first-match.
+
+    This lets the registry drop in for the ordered `for … in INTENTS` loop with
+    provably identical routing (see tests/test_intent_registry_parity.py). After
+    the swap, priorities can be flattened incrementally — letting the literal-
+    match specificity scorer take over — one cluster at a time, with the parity
+    + audit tests catching any behaviour change.
+    """
+    reg = IntentRegistry()
+    n = len(intents)
+    fmap = feature_map or {}
+    for i, (pat, handler) in enumerate(intents):
+        reg.add(Intent(
+            name=getattr(handler, "__name__", f"intent_{i}"),
+            handler=handler,
+            patterns=[pat],
+            priority=n - i,                 # position → strictly descending priority
+            feature=fmap.get(handler),
+        ))
+    return reg

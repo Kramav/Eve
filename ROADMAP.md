@@ -145,8 +145,14 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
     wildcard-captured chars, i.e. most literal → stable order). [tests/test_intent_registry.py](tests/test_intent_registry.py)
     proves routing is **registration-order-independent** (panel beats `open_app` first- or last-added),
     resolves the audit's "snap X to top" case by literal-match specificity, and covers feature gating +
-    the learning counters. **Remaining:** migrate the ~50 built-in `INTENTS` into registry entries and
-    swap `dispatch()`'s first-match loop for `registry.resolve()`, behind test_dispatch + test_intent_audit.
+    the learning counters. **Migration bridge landed:** `intent_registry.from_intents(INTENTS)` builds a
+    registry from the live list with position→priority (semantics-preserving), and
+    [tests/test_intent_registry_parity.py](tests/test_intent_registry_parity.py) **proves it routes
+    identically to the current first-match loop across 60 phrases** — so swapping `dispatch()`'s
+    `for … in INTENTS` loop for `registry.resolve()` is now a small, provably behaviour-preserving diff.
+    **Remaining:** (1) do that swap behind test_dispatch + test_intent_audit + the parity test; (2) then
+    flatten priorities cluster-by-cluster so literal-match specificity takes over, watching the audit
+    shrink its order-dependent set toward empty.
   - **Tier B — local semantic fallback (opt-in, CPU).** Swap the fuzzy tier (`core/intent_match.py`,
     lexical rapidfuzz `token_set_ratio`) for a local sentence-embedding classifier (MiniLM via
     `onnxruntime`, ~80MB, CPU-ms — reuses the vision stack's optional onnxruntime dep). Embeds the
