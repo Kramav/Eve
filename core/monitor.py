@@ -181,7 +181,96 @@ def _load_companion_rect():
 
 def eve_monitor_designated() -> bool:
     """True if the user has picked which monitor is Eve's (for opened windows)."""
-    return bool(_read_settings().get('companionDisplayId'))
+    return bool(_read_settings().get('companionMonitorRect'))
+
+
+# ── Designating the Eve monitor (Python-only — no Electron round-trip) ────────
+# Deliberately resolved and persisted entirely in Python: enumerate_work_areas()
+# already returns true physical rects (this process is per-monitor DPI aware), so
+# we don't need Electron's dipToScreenRect. This keeps the feature off the Electron
+# migration surface — see ROADMAP "Foundation" (Electron integration points).
+
+def _resolve_ref_to_monitor(ref: str, monitors: list):
+    """ref: '1'..'N' | 'primary' | 'left'|'middle'|'right'. → monitor dict | None."""
+    if not monitors:
+        return None
+    if ref == 'primary':
+        return next((m for m in monitors if m.get('is_primary')), None)
+    if ref in ('left', 'middle', 'right'):
+        ordered = sorted(monitors, key=lambda m: m['x'])
+        if ref == 'left':
+            return ordered[0]
+        if ref == 'right':
+            return ordered[-1]
+        return ordered[len(ordered) // 2]
+    if ref.isdigit():
+        i = int(ref) - 1
+        if 0 <= i < len(monitors):
+            return monitors[i]
+    return None
+
+
+def _foreground_monitor(monitors: list):
+    """The monitor the user's current window sits on ('this'/'current')."""
+    hwnd = _u32.GetForegroundWindow()
+    if not hwnd:
+        return None
+    r = ctypes.wintypes.RECT()
+    _u32.GetWindowRect(hwnd, ctypes.byref(r))
+    cx, cy = (r.left + r.right) // 2, (r.top + r.bottom) // 2
+    for m in monitors:
+        if m['x'] <= cx < m['x'] + m['w'] and m['y'] <= cy < m['y'] + m['h']:
+            return m
+    return None
+
+
+def _describe_monitor(m: dict, monitors: list) -> str:
+    """A spoken label like 'right monitor (2560×1440)' so the user can confirm
+    Eve picked the screen they meant (positional is numbering-agnostic)."""
+    ordered = sorted(monitors, key=lambda x: x['x'])
+    if m.get('is_primary'):
+        pos = 'primary'
+    elif len(ordered) >= 2 and m is ordered[0]:
+        pos = 'left'
+    elif len(ordered) >= 2 and m is ordered[-1]:
+        pos = 'right'
+    else:
+        pos = 'middle'
+    return f"{pos} monitor ({m['w']}×{m['h']})"
+
+
+def _write_companion(rect, label: str) -> bool:
+    """Persist companionMonitorRect [x,y,w,h] + a label to settings.json, merging
+    with existing keys. Aborts rather than clobber if settings is unreadable."""
+    try:
+        raw = _SETTINGS_FILE.read_text() if _SETTINGS_FILE.exists() else '{}'
+        data = json.loads(raw)
+    except Exception:
+        return False
+    data['companionMonitorRect'] = [int(v) for v in rect]
+    data['companionLabel']       = label
+    try:
+        _SETTINGS_FILE.write_text(json.dumps(data, indent=2))
+        return True
+    except Exception:
+        return False
+
+
+def set_eve_monitor(ref: str, monitors: list | None = None):
+    """Designate which monitor Eve puts opened windows on. *ref* is
+    '1'..'N' | 'primary' | 'left'|'middle'|'right' | 'this'|'current'.
+    Returns (ok: bool, label_or_message: str)."""
+    monitors = monitors if monitors is not None else enumerate_work_areas()
+    if len(monitors) < 2:
+        return False, "You only have one monitor, so there's nowhere separate to send Eve's windows."
+    m = (_foreground_monitor(monitors) if ref in ('this', 'current')
+         else _resolve_ref_to_monitor(ref, monitors))
+    if not m:
+        return False, ""
+    label = _describe_monitor(m, monitors)
+    if not _write_companion([m['x'], m['y'], m['w'], m['h']], label):
+        return False, "I couldn't save that setting."
+    return True, label
 
 
 def count() -> int:

@@ -78,6 +78,21 @@ def main():
     time.sleep(2)
     display.hide()
 
+    # 3+ monitors and no Eve monitor picked yet? Nudge the user to designate one
+    # so opened windows have a dedicated home (see core.monitor.companion_prompt).
+    from core import monitor as _monitor
+    prompt = _monitor.companion_prompt()
+    if prompt:
+        display.log("system", prompt)
+        try:
+            from core import notify
+            notify.toast("Eve — pick a monitor", prompt)
+        except Exception:
+            pass
+        display.show(status="Multiple monitors detected", text=prompt, color="listening")
+        time.sleep(6)
+        display.hide()
+
     def on_wake():
         display.show(status="Listening...", text="", color="listening")
         display.set_mode("listening")

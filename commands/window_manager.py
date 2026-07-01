@@ -139,6 +139,25 @@ def move_hud(monitor_text: str) -> str:
     return f"Moved HUD to {label}."
 
 
+def set_eve_monitor(monitor_text: str) -> str:
+    """Voice: 'set monitor 2 as Eve's monitor' / 'use my right screen for Eve' /
+    'make this Eve's monitor' → designate where Eve places opened windows (for 3+
+    monitor setups). Resolved and saved entirely in Python (no Electron)."""
+    from core import monitor
+    t = (monitor_text or '').strip().lower()
+    if re.search(r'\b(this|current|here)\b', t):
+        ref = 'this'
+    else:
+        ref = _resolve_monitor_ref(t)
+    if ref is None:
+        return (f"I couldn't tell which monitor you meant from '{monitor_text}'. "
+                "Try 'monitor 2', 'my right monitor', or 'this monitor'.")
+    ok, label = monitor.set_eve_monitor(ref)
+    if not ok:
+        return label or "I couldn't set that as Eve's monitor."
+    return f"Set your {label} as Eve's monitor. I'll put opened windows there."
+
+
 def name_monitor(monitor_text: str, label: str) -> str:
     """Voice: 'name monitor 2 primary display' → save a display-only label for
     that monitor in tiling_layouts.json. The label is for the user's reference

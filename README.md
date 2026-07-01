@@ -86,6 +86,12 @@ directly to the [focus invariant](#philosophy):
   Eve's windows (and the HUD) live over there, so you get the result without the game ever losing focus
   or flickering.
 
+**With three or more monitors,** tell Eve which screen is its home so opened windows have a dedicated
+place: say **"set monitor 2 as Eve's monitor"**, **"use my right screen for Eve"**, or **"make this
+Eve's monitor"**. Eve will still fall back to another screen if a game happens to be running on the one
+you picked. (On exactly two monitors this is automatic — the screen the game isn't on — so no setup is
+needed. Eve nudges you at startup only when you have 3+ monitors and haven't chosen yet.)
+
 **On a single monitor Eve still works** — voice commands, window control, and the overlay HUD all
 function. The trade-off is that an opened window has nowhere to go *but* behind a fullscreen game, and an
 exclusive-fullscreen title may hide the overlay entirely. If you game in **borderless windowed** mode

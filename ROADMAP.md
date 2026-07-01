@@ -154,9 +154,10 @@ next. Links point to the detail.
 | **1 · Flagship promise** | Focus invariant: app-launch + HUD-open focus-steal | ✅ fixed → *Reference · Focus-policy audit* |
 | **1 · Flagship promise** | Focus invariant: browser-launch race, config panels | ⏳ remaining → *Reference · Focus-policy audit* |
 | **1 · Flagship promise** | Multi-monitor: opened windows avoid the game's screen | ✅ shipped → Completed |
-| **1 · Flagship promise** | Designatable "Eve monitor" for 3+ monitor setups + prompt | ⏳ in progress |
+| **1 · Flagship promise** | Designatable "Eve monitor" for 3+ monitor setups + startup prompt | ✅ shipped (Python-only) → Completed |
 | **2 · Performance** | Perf pass #1 (orb throttle, hot-reload gate, dispatch cache, hidden clock) | ✅ done → [Performance](#performance--efficiency-north-star-2) |
 | **2 · Performance** | Live profiler run to confirm idle-CPU drop | ⏳ needs a daily-use moment |
+| **2 · Performance / UX** | STT model options page — pick Whisper model + CPU/GPU per hardware (the biggest felt-latency lever) | ⏳ next candidate → [Voice / UX](#voice--ux) |
 | **4 · Foundation** | Electron → Tauri/native reconsideration | ⏳ parked pending perf numbers → [Foundation](#foundation--desktop-shell-north-star-4) |
 
 **Daily-drive verification queue** (things that need real use to confirm, not just tests): focus invariant
@@ -416,6 +417,29 @@ present tradeoffs, effort, risks, and strategy *first*):
 **Recommendation until then:** *don't migrate yet.* Get the numbers first; Tauri is the most likely
 target if the numbers justify a move (it preserves the web-panel investment), but the audit decides.
 
+### Electron integration points — running catalog for the migration (maintainer flagged a likely switch)
+
+Track everything that *actually* touches Electron so the migration has a checklist and new work doesn't
+quietly grow the surface. **Guiding rule going forward: prefer Python for OS/logic; only reach for
+Electron when it's genuinely UI.** (Example set 2026-07-01: the "Eve monitor" designation was
+implemented **entirely in Python** — `enumerate_work_areas()` gives physical rects directly, so no
+`dipToScreenRect`/WS round-trip was needed — specifically to avoid adding to this list.)
+
+Current Electron-coupled surface (all in `ui/`, driven by the WS/IPC contract):
+- **Windowing:** the orb, routing directory, and ~13 managed panels (`createManagedWindow`), incl. the
+  z-order tricks that must be re-proven on any new shell — topmost-above-fullscreen, `showInactive`,
+  transparent frameless + NC-border fix, `setVisibleOnAllWorkspaces`, per-monitor DPI `dipToScreenRect`.
+- **Display identity:** `overlayDisplayId` (HUD monitor) + `resolveDisplay()` + `identifyMonitors()` use
+  **Electron's** `screen.getAllDisplays()` ordering — the one place monitor *numbering* is Electron's,
+  not Python's. Post-migration this must move to Python enumeration (which the Eve-monitor feature
+  already uses) or a stable shared identity. *(This is why spoken "monitor 2" can differ from Python's
+  index today — noted for the port.)*
+- **Renderers:** all panel UIs are HTML/CSS/JS (Tauri keeps these; native would rewrite them).
+- **Misc host APIs:** tray icon, `shell.openExternal`, `webContents.setZoomFactor` (UI scale), native
+  file picker (command editor), `dipToScreenRect` (tiling physical rects).
+- **Settings writers:** both Electron *and* Python write `settings.json` — after migration, consolidating
+  the writer (or keeping the merge-on-write discipline) matters.
+
 ---
 
 ## P2 — Medium Priority
@@ -557,6 +581,21 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
   (routing, execution, skills, compile guard); zero-dep runners + pytest.
 
 ### Voice / UX
+- **STT model options page** ⭐ — *let the user pick the Whisper/STT model (and CPU/GPU) from a settings
+  UI, so they can trade accuracy vs. speed for their hardware.* **This is the single biggest felt-latency
+  lever** (see Foundation → "Python vs Electron" — the host language barely matters; the STT model does),
+  so exposing it is high-value UX. **Backend already exists:** `config.WHISPER_MODEL` (`auto` →
+  `distil-large-v3` on GPU / `distil-small.en` on CPU), `config.WHISPER_DEVICE` (`auto`/`cuda`/`cpu`) and
+  `config.WHISPER_COMPUTE`, resolved by `core/transcriber._resolve_model()` /
+  `_resolve_device_compute()`. **Remaining:** (1) make these overridable from `settings.json` (mirror the
+  `resolve_wake_word()` pattern — a `stt_model`/`stt_device` key that beats `config`), and (2) a picker in
+  the Voice Settings panel: dropdown of models (`tiny.en` → `base.en` → `small.en` → `distil-small.en` →
+  `distil-large-v3`, etc.) + a CPU/GPU toggle. **UX to include:** detect whether a CUDA GPU is present
+  (`ctranslate2.get_cuda_device_count()`, already used) and recommend/annotate accordingly; show each
+  model's rough size + speed/accuracy trade-off; note the change takes effect on **next launch** (the
+  model loads once at startup, like the wake word). Optional polish: download-on-select with progress, and
+  a one-click "auto-detect best for my hardware." Files: `ui/src/voice-settings/`, `core/transcriber.py`,
+  `config.py`, `settings.json`.
 - **Wake word customization** — *backend done*: `core/listener.resolve_wake_word()` prefers
   `settings.json` `wake_word` over `config.WAKE_WORD`, so the wake word is overridable without a
   code edit (takes effect on next launch — the model loads once at startup). **Remaining:** an App
@@ -818,6 +857,7 @@ Architecture section).
 
 | Feature | Notes |
 |---------|-------|
+| Designatable "Eve monitor" (3+ monitors) | For 3+ monitor setups where "the non-game screen" is ambiguous, the user picks which monitor Eve puts opened windows on: "set monitor 2 as Eve's monitor" / "use my right screen for Eve" / "make this Eve's monitor" → `window_manager.set_eve_monitor` → `monitor.set_eve_monitor` writes `companionMonitorRect` to settings.json. `_select_target_monitor` prefers it, but falls back if the game is running on it. On 3+ monitors with nothing designated, a startup prompt (HUD + toast) nudges the user to pick one. **Implemented entirely in Python** (no Electron round-trip — `enumerate_work_areas` gives physical rects) to keep it off the migration surface. Tests: [tests/test_monitor_target.py](tests/test_monitor_target.py) (index/positional/primary resolution, describe, prompt firing) |
 | Multi-monitor: opened windows avoid the game's screen | Strongly-recommended-2-monitors stance (works with 1). `monitor.get_target_monitor()` refactored around a pure, tested `_select_target_monitor()` policy: places opened windows on whichever monitor the foreground game *isn't* on (adapts to which screen you game on; prefers primary as companion; None on single-monitor → window stays behind, no focus steal). Fixed a latent handle-truncation bug (`MonitorFromWindow` had no ctypes signature → the avoid-the-game comparison could silently never match on 64-bit). The clean workaround for exclusive-fullscreen games — content lives on the other display, no overlay/focus fight. Docs: [README "Multiple monitors"](README.md#multiple-monitors-strongly-recommended). Tests: [tests/test_monitor_target.py](tests/test_monitor_target.py) |
 | Focus invariant — enforce on launch + HUD | Full audit of every focus-affecting path ([ROADMAP "Focus-policy architecture & audit"]). Fixed the two flagship-breaking violations: **app launch** now captures the foreground when a game/protected app owns the screen and restores it after (`apps._capture_focus_guard`/`_restore_foreground`, gated by `game_protection`); **HUD open** uses `showInactive()`+visibility-toggle instead of `show()`+`focus()` so "show hud" never pulls focus off a game. Tests: [tests/test_focus_policy.py](tests/test_focus_policy.py). Remaining (documented): fresh-browser launch race → folds into a chosen-browser primitive; config panels → gray |
 | Window quick-actions skill | [skills/window_actions.py](skills/window_actions.py) drop-in (`PREEMPT`): "minimize/maximize/restore this", "always on top"/"unpin", "close this window", "minimize all", "show desktop", "bring my windows back". New Win32 primitives added to [core/window_ops.py](core/window_ops.py) (minimize/maximize/restore/set_topmost/close_window/foreground_hwnd/is_min/max/topmost/exists/window_title) so the skill uses helpers, not raw ctypes. This-window verbs return `Verified` (re-check state); desktop-wide ones send Win+M/Win+Shift+M/Win+D via `key_ops`. Narrow patterns + pronoun forms left to the core follow-up handler. Tests: [tests/test_window_actions.py](tests/test_window_actions.py) (routing, no-shadow, handler behavior vs a fake desktop) |

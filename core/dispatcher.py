@@ -203,6 +203,14 @@ INTENTS = [
     (r"\b(?:restore|load|apply)\s+(?:layout|workspace)\s+(.+)$",                           tiling.restore_workspace),
     (r"\b(?:what|which|list)\s+(?:layouts?|workspaces?)(?:\s+do\s+i\s+have)?\b",            tiling.list_workspaces),
 
+    # ── Designate the "Eve monitor" (where opened windows go, 3+ monitors) ──
+    # MUST come before set_monitor_layout: "set monitor 2 as eve's monitor" would
+    # otherwise be read as a layout command (layout = "eve's monitor").
+    (r"(?:set|make|use)\s+(.+?)\s+(?:as|for)\s+eve'?s?\s+(?:monitor|screen|display)\b",  wm.set_eve_monitor),
+    (r"(?:make|set|use)\s+(this|current)\s+(?:as\s+)?eve'?s?\s+(?:monitor|screen|display)\b", wm.set_eve_monitor),
+    (r"\b(this|current)\s+is\s+eve'?s?\s+(?:monitor|screen|display)\b",                   wm.set_eve_monitor),
+    (r"\bput\s+eve'?s?\s+windows?\s+on\s+(.+)$",                                          wm.set_eve_monitor),
+
     # ── Voice WM mutation ─────────────────────────────────────────────────
     # "set monitor 1 to 2x2 grid", "make monitor two top and bottom",
     # "change display three to full screen" — connector to/into/as is optional

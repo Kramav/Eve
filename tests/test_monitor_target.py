@@ -74,14 +74,86 @@ def test_designated_eve_monitor_ignored_on_single_monitor():
     assert monitor._select_target_monitor([M0], avoid_index=0, companion_rect=COMP_M2) is None
 
 
+# ── ref resolution for designation ("set X as Eve's monitor") ─────────────────
+
+# enumerate_work_areas() shape: {'x','y','w','h','is_primary'}
+WA0 = {'x': 0,    'y': 0, 'w': 1920, 'h': 1040, 'is_primary': True}
+WA1 = {'x': 1920, 'y': 0, 'w': 1920, 'h': 1040, 'is_primary': False}
+WA2 = {'x': 3840, 'y': 0, 'w': 2560, 'h': 1440, 'is_primary': False}
+MONS = [WA0, WA1, WA2]
+
+
+def test_resolve_by_index():
+    assert monitor._resolve_ref_to_monitor('2', MONS) is WA1
+
+
+def test_resolve_by_position():
+    assert monitor._resolve_ref_to_monitor('left', MONS) is WA0
+    assert monitor._resolve_ref_to_monitor('right', MONS) is WA2
+    assert monitor._resolve_ref_to_monitor('middle', MONS) is WA1
+
+
+def test_resolve_primary():
+    assert monitor._resolve_ref_to_monitor('primary', MONS) is WA0
+
+
+def test_resolve_out_of_range_is_none():
+    assert monitor._resolve_ref_to_monitor('9', MONS) is None
+
+
+def test_describe_is_positional_and_sized():
+    assert monitor._describe_monitor(WA2, MONS) == 'right monitor (2560×1440)'
+    assert monitor._describe_monitor(WA0, MONS) == 'primary monitor (1920×1040)'
+
+
+def test_set_eve_monitor_single_monitor_declines():
+    ok, msg = monitor.set_eve_monitor('right', monitors=[WA0])
+    assert ok is False and 'one monitor' in msg
+
+
+# ── startup prompt: fire only on 3+ monitors when nothing is designated ───────
+
+def test_companion_prompt_fires_on_3plus_undesignated(monkeypatch):
+    monkeypatch.setattr(monitor, 'count', lambda: 3)
+    monkeypatch.setattr(monitor, 'eve_monitor_designated', lambda: False)
+    assert monitor.companion_prompt() is not None
+
+
+def test_companion_prompt_silent_when_designated(monkeypatch):
+    monkeypatch.setattr(monitor, 'count', lambda: 3)
+    monkeypatch.setattr(monitor, 'eve_monitor_designated', lambda: True)
+    assert monitor.companion_prompt() is None
+
+
+def test_companion_prompt_silent_on_two_monitors(monkeypatch):
+    # Two monitors is unambiguous (the non-game screen) — no designation needed.
+    monkeypatch.setattr(monitor, 'count', lambda: 2)
+    monkeypatch.setattr(monitor, 'eve_monitor_designated', lambda: False)
+    assert monitor.companion_prompt() is None
+
+
 # ── zero-dependency runner ─────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    class _MP:
+        def __init__(self): self._undo = []
+        def setattr(self, obj, name, val):
+            self._undo.append((obj, name, getattr(obj, name)))
+            setattr(obj, name, val)
+        def undo(self):
+            for obj, name, val in reversed(self._undo):
+                setattr(obj, name, val)
+
+    import inspect
     failed = 0
     for k, v in sorted(globals().items()):
         if k.startswith("test_") and callable(v):
+            mp = _MP()
             try:
-                v()
+                if "monkeypatch" in inspect.signature(v).parameters:
+                    v(mp)
+                else:
+                    v()
                 print(f"  PASS  {v.__name__}")
             except AssertionError as e:
                 failed += 1
@@ -89,5 +161,7 @@ if __name__ == "__main__":
             except Exception as e:
                 failed += 1
                 print(f"  ERROR {v.__name__}: {type(e).__name__}: {e}")
+            finally:
+                mp.undo()
     total = sum(1 for k in globals() if k.startswith("test_"))
     print(f"\n{total - failed} passed, {failed} failed")
