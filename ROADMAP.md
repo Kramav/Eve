@@ -8,6 +8,28 @@ Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2**
 
 ---
 
+## Core Definition (identity — canonical copy in [README.md](README.md))
+
+- **Identity:** a voice-driven, **focus-preserving** overlay for Windows. The differentiator is the
+  *feel* — Eve acts without interrupting you.
+- **Flagship / brand:** the game-guide companion — look things up over a running game, hands-free.
+- **Foundation:** general OS UI/UX control (windows, apps, tiling, system). *Gaming is the lens we
+  design and demo through, **not** a set of game-specific features* — build generic capabilities and
+  show them off through gaming.
+- **The focus invariant (non-negotiable):** Eve never takes focus from the user's task unless
+  explicitly asked to. Everything happens *beside* the task, never *in front of* it. **A command that
+  steals focus is a bug, not a trade-off.** The z-order primitives in
+  [core/window_ops.py](core/window_ops.py) are the heart of this.
+  - *Consequence / open task:* audit every side-effecting path against the invariant. Known suspects
+    the roadmap previously waved off: **app-launch focus-steal** and **panel-open focus** ("left
+    ungated" — see the "Focus & front essential programs" completed note). Under this identity, a launch
+    that yanks focus off a fullscreen game is a **P0 correctness bug**, not a footnote. Also verify the
+    **exclusive-fullscreen** case (true exclusive fullscreen can't be overlaid — detect + degrade
+    gracefully to voice-only so the *control-without-alt-tabbing* promise still holds even when the HUD
+    can't draw).
+
+---
+
 ## North Star — Engine-first (current direction, 2026-07-01)
 
 > **The goal right now is an exceptional *engine*, not a shipped product.** Build something that

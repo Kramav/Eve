@@ -1,6 +1,66 @@
-# Eve — Local Voice Assistant
+# Eve — a focus-preserving voice assistant for Windows
 
-A fully local, free Windows voice assistant. No cloud, no API keys. Wake word detection, speech recognition, and text-to-speech all run on your machine.
+**Control your PC by voice without losing focus on what you're doing.** Eve was born from a simple
+want: to look something up *while playing a game* — a boss fight, a recipe, a wiki page — without
+alt-tabbing out and breaking the moment. Everything grew from there.
+
+Fully local and free: wake word, speech recognition, and text-to-speech all run on your machine — no
+cloud, no API keys.
+
+---
+
+## Philosophy
+
+> **The core idea: do things on your PC without pulling you out of what you're doing.**
+
+Most voice assistants treat voice as a *convenience*. Eve is built for the situation where voice is the
+*only* thing that works — your hands are on the keyboard and mouse, and a game (or a document, or a
+video) owns the screen. In that moment you can't reach for a mouse-driven menu and you can't afford to
+alt-tab away. Voice + **never stealing focus** is the only combination that beats the status quo.
+
+That leads to one hard, non-negotiable rule:
+
+> **The focus invariant — Eve never takes focus from your task unless you explicitly ask it to.**
+> Snapping a window, launching an app, searching the web, reading a reminder: all of it happens
+> *beside* what you're doing, never *in front of* it. A command that yanks focus off your game is a
+> bug, not a trade-off. (The Win32 z-order work in [`core/window_ops.py`](core/window_ops.py) — raising
+> a window above the foreground *without* activating it — is the heart of this, and the heart of Eve.)
+
+**What Eve is:**
+- **Identity** — a voice-driven, *focus-preserving* overlay for Windows. The differentiator is the
+  *feel*: it acts without interrupting you.
+- **Flagship** — the game-guide companion: search and surface information over a running game, hands-free.
+- **Foundation** — general OS UI/UX control (windows, apps, tiling, system) so it's genuinely useful to
+  anyone, every day — not just while gaming. *Gaming is the lens we design and demo through, not a set of
+  game-specific features.*
+
+**Design principles** — every change optimizes for: speed · responsiveness · smooth UX · elegant UI ·
+low resource use · clean architecture · maintainability · extensibility. **Every feature must justify
+its cost in complexity and performance.** A fast, polished, intuitive assistant beats a feature-packed
+one that's slower or harder to maintain. We avoid feature bloat.
+
+### How Eve is organized (core vs. skills vs. integrations)
+
+Three layers, and it's worth keeping them straight:
+
+- **Core (the kernel)** — the machine that runs everything: the always-on loop (wake word → speech →
+  dispatch → response → overlay/voice) and the **OS-integration primitives** (`window_ops`, `key_ops`,
+  `monitor`, `notify`) plus the UX contract (response types, the HUD). Core is *not* a feature; it's what
+  features are built on. The focus-preserving primitives live here. This defines how Eve *feels*.
+- **Capabilities** — everything a user experiences as "Eve can do X." These are either **built-in
+  features** (`commands/`, in-box and often central, e.g. tiling, search, reminders) or **skills**
+  (`skills/*.py`, self-contained, optional, deletable single files that extend Eve *without editing
+  core*). The line between the two is centrality/maturity, not a hard wall. Everything is voice-invoked —
+  that's not what makes something a skill; being a droppable, optional capability is.
+- **Integrations** — the *connection to an external system* (a device, a service, an API key). An
+  integration isn't a code tier — it's something a capability *owns*, usually behind a backend
+  abstraction (the 3D-printer **skill** integrates with PrusaLink/Bambu; web search integrates with the
+  Brave API). The **Integrations** panel in the UI just manages those credentials/setup.
+
+**The test for where something belongs:** does it define how Eve feels, or is it relied on by many
+features? → core. Is it one capability a user might never touch? → skill. Does it talk to an outside
+device/service/key? → it has an integration. And above all: **does it respect the focus invariant?** If
+not, it doesn't ship.
 
 ---
 
