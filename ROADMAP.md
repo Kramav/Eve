@@ -30,6 +30,69 @@ Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2**
 
 ---
 
+## Focus-policy architecture & audit (2026-07-01)
+
+**The seam:** focus arbitration already exists as [core/essential.py](core/essential.py)
+`should_defer()` / `active()` (+ [core/window_ops.py](core/window_ops.py) `fullscreen_app_running()`),
+but **only [commands/discord.py](commands/discord.py) and [commands/search.py](commands/search.py)
+consult it.** The architectural fix is not new structure — it's *promoting that check from a
+per-feature courtesy to an enforced, app-wide invariant*: (1) window create/raise goes through the
+`window_ops` `NOACTIVATE` primitives (never `SetForegroundWindow`); (2) process launch + panel open
+consult the focus policy and **restore the prior foreground** when a task is protected; (3) taking
+focus becomes an explicit opt-in via the one sanctioned path ([core/key_ops.py](core/key_ops.py)
+`with_window_focused`, which already restores focus after). A follow-up guard/test can flag raw
+`SetForegroundWindow` outside `key_ops` and raw `ShellExecute` launches that bypass the app-launch
+primitive.
+
+**Audit — every side-effecting focus-relevant path, classified:**
+
+*Compliant (focus-safe by design — the patterns to copy):*
+- `window_ops.raise_to_top_no_focus` / `send_to_bottom` / `set_topmost` — all `SWP_NOACTIVATE`, never
+  `SetForegroundWindow`. The core primitive. ✅
+- `monitor.move_new_window*`, `tiling` snap, `window_manager` placement — `SW_SHOWNOACTIVATE` +
+  `SWP_NOACTIVATE`. ✅
+- Electron **orb** (`focusable:false`) and **YouTube overlay** (`showInactive()`) — the over-a-game
+  surfaces, correctly never focus-stealing. ✅
+- `search._firefox_search` — checks `fullscreen_app_running()`, leaves the browser backgrounded over a
+  game, else `raise_to_top_no_focus`. ✅ *(residual: a **fresh** Firefox launch can self-activate during
+  the ~1.2s before the raise — minor race, see #3.)*
+
+*Sanctioned focus-taker (explicit opt-in, keep):*
+- `key_ops.focus_window` / `with_window_focused` → `SetForegroundWindow` + restores previous foreground.
+  The one allowed way to take focus; used by Discord nav, which **does** gate on `essential.active()`. ✅
+
+*Violations — steal focus, NOT gated by the focus policy (the punch list):*
+1. **★ App launch — [commands/apps.py:163](commands/apps.py#L163).** `ShellExecuteW(..., nCmdShow=4)`
+   is only a *hint*; a freshly launched app typically grabs foreground on startup, and `open_app` never
+   consults `should_defer()`/`fullscreen_app_running()`. **So "open firefox" while gaming yanks focus off
+   the game** — the headline invariant violation. Fix: mirror `search`'s pattern — when a task is
+   protected, capture the foreground first and **re-assert it after** the new window appears (the
+   placement thread already runs `NOACTIVATE`; add a "restore prior foreground" step there). P0.
+2. **★ Routing directory / HUD open — [ui/main.js:197-199](ui/main.js#L197-L199)** (and the raise branch
+   [:219](ui/main.js#L219)). `dirWin.show()` + `.focus()` steals focus every time the HUD opens by voice
+   ("show hud") — a *glanceable status surface* should never pull you out of a game. Fix: `showInactive()`
+   + `moveTop()`. Complication: `toggleDirectory` currently uses `isFocused()` to decide open-vs-close —
+   switch it to track a visibility flag instead of focus. P0 for voice-triggered opens; an orb *click*
+   is a deliberate act where focus is arguably fine.
+3. **Fresh-browser-launch focus race — [commands/search.py:214-222](commands/search.py#L214-L222).** When
+   Firefox isn't already running, it can self-activate before `raise_to_top_no_focus` runs. Fold into the
+   #1 fix (capture + restore prior foreground when protected). P1.
+4. **Managed config panels — [ui/main.js](ui/main.js)** (app-manager/window-manager/voice-settings/
+   command-editor/programs/memory/reminders/integrations) use `.show()`/`.focus()`. **Gray, not a clear
+   violation:** opening an interactive *form* by voice implies intent to interact, so focus is defensible.
+   Revisit only if daily use shows opening a panel mid-game is disruptive; if so, `showInactive()` + let a
+   click focus. P2.
+
+**Doc correction:** the "Focus & front essential programs" completed note claims "panels already
+`showInactive`" — inaccurate. Only the YouTube overlay does; the directory and all managed panels use
+`show()`/`focus()`. (This audit supersedes that note.)
+
+**Order:** #1 (app-launch) and #2 (HUD open) are the two that break the promise in the flagship
+scenario; do them first, ideally after the profiler/daily-use confirms them live. #1 is the natural
+companion to the "chosen-browser surface-without-focus" core primitive discussed for search.
+
+---
+
 ## North Star — Engine-first (current direction, 2026-07-01)
 
 > **The goal right now is an exceptional *engine*, not a shipped product.** Build something that
