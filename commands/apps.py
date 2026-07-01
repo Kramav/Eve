@@ -137,6 +137,36 @@ def _load_apps() -> dict:
         return {}
 
 
+# ── Focus invariant on launch ────────────────────────────────────────────────
+# Launching an app must not pull focus off a game / protected task. ShellExecute's
+# nCmdShow=4 (SW_SHOWNOACTIVATE) is only a hint — apps routinely self-activate on
+# startup — so when a protected app owns the screen we capture the prior foreground
+# and hand focus back once the new window has settled. Gated by game_protection via
+# essential.should_defer().
+
+def _capture_focus_guard() -> int:
+    """hwnd whose focus must be restored after a launch, or 0 if focus is free to
+    move. Non-zero only when a game / protected app currently owns the screen."""
+    from core import essential, window_ops
+    if essential.should_defer():
+        return window_ops.foreground_hwnd()
+    return 0
+
+
+def _restore_foreground(hwnd: int, attempts=(1.5, 1.5)) -> None:
+    """Re-assert *hwnd* as the foreground window if a just-launched app stole it.
+    Retries a couple of times to cover apps that activate late in startup; skips
+    once the window is gone or already foreground (so we never fight the user)."""
+    import time
+    from core import window_ops, key_ops
+    for wait in attempts:
+        time.sleep(wait)
+        if not window_ops.exists(hwnd):
+            return
+        if window_ops.foreground_hwnd() != hwnd:
+            key_ops.focus_window(hwnd)
+
+
 def open_app(name: str, snap_rect: tuple | None = None) -> str:
     """Launch an app. If *snap_rect* is provided (x, y, w, h in screen pixels),
     the new window is snapped there instead of centred on a free monitor."""
@@ -168,6 +198,10 @@ def open_app(name: str, snap_rect: tuple | None = None) -> str:
         verifiable = exe.lower().endswith(".exe")
         proc_before = _count_proc(exe) if verifiable else 0
 
+        # Capture the focus-restore target BEFORE launching (foreground is still
+        # the user's task at this point).
+        focus_guard = _capture_focus_guard()
+
         before = monitor.snapshot_windows(min_size=0)  # include compact overlay so it's never misidentified as new
         _spawn()
         if snap_rect is not None:
@@ -183,6 +217,12 @@ def open_app(name: str, snap_rect: tuple | None = None) -> str:
                 args=(before, target),
                 daemon=True,
             ).start()
+
+        # Focus invariant: hand focus back to the game / protected task the launch
+        # may have stolen it from.
+        if focus_guard:
+            threading.Thread(target=_restore_foreground,
+                             args=(focus_guard,), daemon=True).start()
 
         # Can't tie this command to a process image — report optimistically.
         if not verifiable:

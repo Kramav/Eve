@@ -5,10 +5,14 @@ stealing focus from the currently active window.
 
 import ctypes
 import ctypes.wintypes
+import json
 import time
+from pathlib import Path
 
 _u32    = ctypes.windll.user32
 _dwmapi = ctypes.windll.dwmapi
+
+_SETTINGS_FILE = Path(__file__).parent.parent / 'settings.json'
 
 _DWMWA_EXTENDED_FRAME_BOUNDS = 9
 
@@ -70,6 +74,12 @@ HWND_BOTTOM    = 1    # place behind all other windows
 HWND_TOPMOST   = -1
 HWND_NOTOPMOST = -2
 
+# Proper signatures — without these the HMONITOR return defaults to 32-bit c_int
+# and gets truncated on 64-bit Windows, so the "avoid the game's monitor" handle
+# comparison in get_target_monitor() would silently never match.
+_u32.MonitorFromWindow.argtypes = [ctypes.wintypes.HWND, ctypes.wintypes.DWORD]
+_u32.MonitorFromWindow.restype  = ctypes.c_void_p
+
 
 def enumerate_work_areas() -> list[dict]:
     """Return every connected monitor's physical-pixel work-area rect.
@@ -99,9 +109,101 @@ def enumerate_work_areas() -> list[dict]:
     return out
 
 
+def _rect_contains(rect_ltrb, point) -> bool:
+    l, t, r, b = rect_ltrb
+    px, py = point
+    return l <= px < r and t <= py < b
+
+
+def _select_target_monitor(monitors: list, avoid_index, companion_rect=None):
+    """Pure companion-monitor picker (testable — no Win32).
+
+    *monitors* is a list of ``{'rect': (l,t,r,b), 'is_primary': bool}`` in
+    enumeration order. *avoid_index* is the index of the monitor hosting the
+    user's task (the game) — we never place a new window there, so it doesn't
+    land *behind* the game. This is why Eve strongly recommends a second monitor:
+    with one, there's nowhere to put an opened window except behind the game
+    (esp. exclusive fullscreen); with two, opened windows go to whichever screen
+    the game *isn't* on.
+
+    *companion_rect* (x, y, w, h) is the user-designated "Eve monitor" (for 3+
+    monitor setups — see `eve_monitor_designated`). When it's a candidate (i.e.
+    the game isn't on it) it wins; when the game IS on it, we fall back to the
+    auto policy so opened windows still don't land behind the game.
+
+    Returns the chosen work-area rect, or None when there's no other monitor
+    (single-monitor → caller keeps the window behind the foreground, no focus
+    steal). Among un-designated candidates, prefers the primary monitor (so
+    windows land on your main screen when you game on a secondary), else the
+    first other one.
+    """
+    if len(monitors) < 2:
+        return None
+    candidates = [m for i, m in enumerate(monitors) if i != avoid_index]
+    if not candidates:
+        return None
+    # 1. Honor the designated Eve monitor if the game isn't sitting on it.
+    if companion_rect:
+        cx = companion_rect[0] + companion_rect[2] / 2
+        cy = companion_rect[1] + companion_rect[3] / 2
+        for m in candidates:
+            if _rect_contains(m['rect'], (cx, cy)):
+                return m['rect']
+        # Designated monitor is where the game is → fall through to auto.
+    # 2. Prefer the primary monitor as companion, else the first other one.
+    for m in candidates:
+        if m.get('is_primary'):
+            return m['rect']
+    return candidates[0]['rect']
+
+
+# ── Eve-monitor designation (settings.json, written by Electron) ─────────────
+
+def _read_settings() -> dict:
+    try:
+        return json.loads(_SETTINGS_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _load_companion_rect():
+    """Physical work-area rect (x, y, w, h) of the designated Eve monitor, or
+    None. Electron writes `companionMonitorRect` via dipToScreenRect when the
+    user designates a monitor, so the value is already in Win32 physical pixels."""
+    r = _read_settings().get('companionMonitorRect')
+    if isinstance(r, (list, tuple)) and len(r) == 4:
+        try:
+            return tuple(int(v) for v in r)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def eve_monitor_designated() -> bool:
+    """True if the user has picked which monitor is Eve's (for opened windows)."""
+    return bool(_read_settings().get('companionDisplayId'))
+
+
+def count() -> int:
+    """Number of connected monitors."""
+    return len(enumerate_work_areas())
+
+
+def companion_prompt():
+    """A one-line nudge to designate an Eve monitor, or None. Fires only on 3+
+    monitors when nothing is designated yet — with two monitors the choice is
+    unambiguous (the screen the game isn't on) and no designation is needed."""
+    if count() >= 3 and not eve_monitor_designated():
+        return ("You have several monitors — tell me which is Eve's, so opened "
+                "windows land there. Say, for example, 'set monitor 2 as Eve's monitor'.")
+    return None
+
+
 def get_target_monitor():
-    """Return the work-area rect of a monitor NOT currently hosting the
-    foreground window.  Returns None when only one monitor is connected."""
+    """Work-area rect of a monitor NOT hosting the foreground window (the game),
+    so opened windows appear beside the task rather than behind it. Prefers the
+    designated Eve monitor when set. None when only one monitor is connected.
+    See `_select_target_monitor` for the policy."""
     monitors = []
 
     def _cb(hMon, *_):
@@ -109,20 +211,19 @@ def get_target_monitor():
         info.cbSize = ctypes.sizeof(_MONITORINFO)
         _u32.GetMonitorInfoW(hMon, ctypes.byref(info))
         r = info.rcWork
-        monitors.append({'handle': hMon, 'rect': (r.left, r.top, r.right, r.bottom)})
+        monitors.append({
+            'handle':     hMon,
+            'rect':       (r.left, r.top, r.right, r.bottom),
+            'is_primary': bool(info.dwFlags & 1),   # MONITORINFOF_PRIMARY
+        })
         return True
 
     _u32.EnumDisplayMonitors(None, None, _MONITORENUMPROC(_cb), 0)
-    if len(monitors) < 2:
-        return None
 
     hwnd = _u32.GetForegroundWindow()
     current = _u32.MonitorFromWindow(hwnd, 2) if hwnd else None  # MONITOR_DEFAULTTONEAREST
-
-    for m in monitors:
-        if m['handle'] != current:
-            return m['rect']
-    return None
+    avoid_index = next((i for i, m in enumerate(monitors) if m['handle'] == current), None)
+    return _select_target_monitor(monitors, avoid_index, _load_companion_rect())
 
 
 def snapshot_windows(min_size: int = 100):

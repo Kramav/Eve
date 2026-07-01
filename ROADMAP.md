@@ -1,14 +1,23 @@
-# Eve — Feature Roadmap
+# Eve — Roadmap
 
-Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2** (soon) → **P3** (future consideration)
+**How to read this doc** — it's organized top-to-bottom from "why" to "detail." Start at the top:
 
-> **Note on tiers:** the P0/P1/P2/P3 labels below are *historical* — they were written when
-> "ship publicly" was the goal. The **current** ordering is the North Star section directly below;
-> read that first. The tier labels are kept only so old entries stay findable.
+| # | Section | What it answers |
+|---|---------|-----------------|
+| 1 | **What Eve is** | the identity + the one hard rule (the focus invariant). Start here. |
+| 2 | **Current priorities** | what we optimize for *right now* (engine-first), in strict order. |
+| 3 | **Active work** | the workstreams actually in flight, each with status + a link to detail. |
+| — | **Reference** | deep detail: focus-policy audit, performance audit, foundation/Electron analysis, the "core vs skill" rule, and the skill catalog. Read on demand. |
+| — | **Archive** | the old **P0–P3** release-blocker tiers. Historical — kept so old entries stay findable. **Not** current priorities. |
+| — | **Completed** | shipped work, for reference. |
+
+> ⚠️ The **P0–P3** labels further down are *historical* (from when shipping publicly was the goal).
+> The real current direction is **§2 Current priorities**, not the tiers.
 
 ---
 
-## Core Definition (identity — canonical copy in [README.md](README.md))
+## 1 · What Eve is  —  identity & the one hard rule
+*(canonical copy in [README.md](README.md))*
 
 - **Identity:** a voice-driven, **focus-preserving** overlay for Windows. The differentiator is the
   *feel* — Eve acts without interrupting you.
@@ -26,11 +35,14 @@ Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2**
     that yanks focus off a fullscreen game is a **P0 correctness bug**, not a footnote. Also verify the
     **exclusive-fullscreen** case (true exclusive fullscreen can't be overlaid — detect + degrade
     gracefully to voice-only so the *control-without-alt-tabbing* promise still holds even when the HUD
-    can't draw).
+    can't draw). **Primary mitigation shipped:** Eve strongly recommends a second monitor and places
+    opened windows on whichever screen the game *isn't* on — which side-steps exclusive fullscreen
+    entirely (the content lives on the other display, no overlay/focus fight). See the multi-monitor
+    Completed row + [README](README.md#multiple-monitors-strongly-recommended).
 
 ---
 
-## Focus-policy architecture & audit (2026-07-01)
+## Reference · Focus-policy audit  —  *(detail behind §3; skip on a first read)*
 
 **The seam:** focus arbitration already exists as [core/essential.py](core/essential.py)
 `should_defer()` / `active()` (+ [core/window_ops.py](core/window_ops.py) `fullscreen_app_running()`),
@@ -62,18 +74,18 @@ primitive.
   The one allowed way to take focus; used by Discord nav, which **does** gate on `essential.active()`. ✅
 
 *Violations — steal focus, NOT gated by the focus policy (the punch list):*
-1. **★ App launch — [commands/apps.py:163](commands/apps.py#L163).** `ShellExecuteW(..., nCmdShow=4)`
-   is only a *hint*; a freshly launched app typically grabs foreground on startup, and `open_app` never
-   consults `should_defer()`/`fullscreen_app_running()`. **So "open firefox" while gaming yanks focus off
-   the game** — the headline invariant violation. Fix: mirror `search`'s pattern — when a task is
-   protected, capture the foreground first and **re-assert it after** the new window appears (the
-   placement thread already runs `NOACTIVATE`; add a "restore prior foreground" step there). P0.
-2. **★ Routing directory / HUD open — [ui/main.js:197-199](ui/main.js#L197-L199)** (and the raise branch
-   [:219](ui/main.js#L219)). `dirWin.show()` + `.focus()` steals focus every time the HUD opens by voice
-   ("show hud") — a *glanceable status surface* should never pull you out of a game. Fix: `showInactive()`
-   + `moveTop()`. Complication: `toggleDirectory` currently uses `isFocused()` to decide open-vs-close —
-   switch it to track a visibility flag instead of focus. P0 for voice-triggered opens; an orb *click*
-   is a deliberate act where focus is arguably fine.
+1. **★ DONE — App launch focus-steal ([commands/apps.py](commands/apps.py)).** `open_app` now captures a
+   **focus guard** before launching (`_capture_focus_guard()` → the foreground hwnd, but only when
+   `essential.should_defer()` says a game/protected app owns the screen), and after the placement thread
+   spins up a `_restore_foreground()` thread that re-asserts the task's focus if the launched app stole
+   it (retries for late-activating apps; skips if the task is already foreground or gone). Gated by
+   `game_protection`. So "open discord" mid-game keeps you in the game. Tests:
+   [tests/test_focus_policy.py](tests/test_focus_policy.py).
+2. **★ DONE — Routing directory / HUD open focus-steal ([ui/main.js](ui/main.js)).** `present()` now uses
+   `showInactive()` + `moveTop()` (was `show()` + `.focus()`), so opening the HUD by voice never pulls
+   focus off a game — it appears beside the task. `toggleDirectory()` switched from an `isFocused()`
+   check to a plain visibility toggle (it no longer holds focus). Clicking a row/button still focuses the
+   window on demand, so interaction is unaffected.
 3. **Fresh-browser-launch focus race — [commands/search.py:214-222](commands/search.py#L214-L222).** When
    Firefox isn't already running, it can self-activate before `raise_to_top_no_focus` runs. Fold into the
    #1 fix (capture + restore prior foreground when protected). P1.
@@ -87,13 +99,15 @@ primitive.
 `showInactive`" — inaccurate. Only the YouTube overlay does; the directory and all managed panels use
 `show()`/`focus()`. (This audit supersedes that note.)
 
-**Order:** #1 (app-launch) and #2 (HUD open) are the two that break the promise in the flagship
-scenario; do them first, ideally after the profiler/daily-use confirms them live. #1 is the natural
-companion to the "chosen-browser surface-without-focus" core primitive discussed for search.
+**Order:** #1 (app-launch) and #2 (HUD open) — the two that broke the promise in the flagship scenario —
+are **DONE**. Remaining: #3 (fresh-browser launch race) folds into the "chosen-browser
+surface-without-focus" core primitive for search; #4 (config panels) is gray, revisit only if daily use
+shows it's disruptive. **Verify #1/#2 live during daily-driving:** launch an app and open the HUD by
+voice while a fullscreen game is focused — the game should keep focus in both cases.
 
 ---
 
-## North Star — Engine-first (current direction, 2026-07-01)
+## 2 · Current priorities  —  engine-first (2026-07-01)
 
 > **The goal right now is an exceptional *engine*, not a shipped product.** Build something that
 > feels incredibly fast, polished, and intuitive to use day-to-day. Distribution comes *after* the
@@ -127,6 +141,40 @@ distribution (former P0 #5). Do not spend time here until the engine feels produ
 parked note under P0 #5.
 
 ---
+
+## 3 · Active work (in flight)
+
+The workstreams actually being touched now, mapped to the §2 priorities. ✅ = done, ⏳ = in progress /
+next. Links point to the detail.
+
+| Priority | Workstream | Status |
+|----------|-----------|--------|
+| **1 · Capability** | Window quick-actions skill | ✅ shipped ([skills/window_actions.py](skills/window_actions.py)) |
+| **1 · Capability** | More UI/UX automation skills; harden Visual Navigation via daily use | ⏳ next → [Skill Library](#skill-library--candidate-drop-in-skills), [Visual Navigation](#visual-navigation-skill--phase-1-done-phase-2-mostly-done-2d-onnx-detector-pending) |
+| **1 · Flagship promise** | Focus invariant: app-launch + HUD-open focus-steal | ✅ fixed → *Reference · Focus-policy audit* |
+| **1 · Flagship promise** | Focus invariant: browser-launch race, config panels | ⏳ remaining → *Reference · Focus-policy audit* |
+| **1 · Flagship promise** | Multi-monitor: opened windows avoid the game's screen | ✅ shipped → Completed |
+| **1 · Flagship promise** | Designatable "Eve monitor" for 3+ monitor setups + prompt | ⏳ in progress |
+| **2 · Performance** | Perf pass #1 (orb throttle, hot-reload gate, dispatch cache, hidden clock) | ✅ done → [Performance](#performance--efficiency-north-star-2) |
+| **2 · Performance** | Live profiler run to confirm idle-CPU drop | ⏳ needs a daily-use moment |
+| **4 · Foundation** | Electron → Tauri/native reconsideration | ⏳ parked pending perf numbers → [Foundation](#foundation--desktop-shell-north-star-4) |
+
+**Daily-drive verification queue** (things that need real use to confirm, not just tests): focus invariant
+under a real fullscreen game (launch an app + open the HUD by voice — game keeps focus); exclusive-fullscreen
+degrade; the orb-throttle idle-CPU drop.
+
+---
+
+# ═══ Reference & Archive (below) ═══
+*Everything from here down is detail, history, or catalog — not the current plan. The current plan is
+§1–§3 above.*
+
+---
+
+## Archive · Historical release-blocker tiers (P0–P3)
+
+> These tiers were written when **shipping publicly** was the goal (now deprioritized — see §2). They're
+> kept because many entries are done/useful and old notes link to them. **Not** the current priority order.
 
 ## P0 — (historical) Release Blockers
 
@@ -770,6 +818,8 @@ Architecture section).
 
 | Feature | Notes |
 |---------|-------|
+| Multi-monitor: opened windows avoid the game's screen | Strongly-recommended-2-monitors stance (works with 1). `monitor.get_target_monitor()` refactored around a pure, tested `_select_target_monitor()` policy: places opened windows on whichever monitor the foreground game *isn't* on (adapts to which screen you game on; prefers primary as companion; None on single-monitor → window stays behind, no focus steal). Fixed a latent handle-truncation bug (`MonitorFromWindow` had no ctypes signature → the avoid-the-game comparison could silently never match on 64-bit). The clean workaround for exclusive-fullscreen games — content lives on the other display, no overlay/focus fight. Docs: [README "Multiple monitors"](README.md#multiple-monitors-strongly-recommended). Tests: [tests/test_monitor_target.py](tests/test_monitor_target.py) |
+| Focus invariant — enforce on launch + HUD | Full audit of every focus-affecting path ([ROADMAP "Focus-policy architecture & audit"]). Fixed the two flagship-breaking violations: **app launch** now captures the foreground when a game/protected app owns the screen and restores it after (`apps._capture_focus_guard`/`_restore_foreground`, gated by `game_protection`); **HUD open** uses `showInactive()`+visibility-toggle instead of `show()`+`focus()` so "show hud" never pulls focus off a game. Tests: [tests/test_focus_policy.py](tests/test_focus_policy.py). Remaining (documented): fresh-browser launch race → folds into a chosen-browser primitive; config panels → gray |
 | Window quick-actions skill | [skills/window_actions.py](skills/window_actions.py) drop-in (`PREEMPT`): "minimize/maximize/restore this", "always on top"/"unpin", "close this window", "minimize all", "show desktop", "bring my windows back". New Win32 primitives added to [core/window_ops.py](core/window_ops.py) (minimize/maximize/restore/set_topmost/close_window/foreground_hwnd/is_min/max/topmost/exists/window_title) so the skill uses helpers, not raw ctypes. This-window verbs return `Verified` (re-check state); desktop-wide ones send Win+M/Win+Shift+M/Win+D via `key_ops`. Narrow patterns + pronoun forms left to the core follow-up handler. Tests: [tests/test_window_actions.py](tests/test_window_actions.py) (routing, no-shadow, handler behavior vs a fake desktop) |
 | Engine perf pass #1 | Static audit + 4 idle-cost fixes: orb canvas throttled to ~18fps when idle (was 60fps forever), hot-reload 1s FS poll gated behind `EVE_DEV`, per-command `custom_commands`/`aliases` JSON now mtime-cached, hidden-directory clock stops re-rendering. Profiler harness [tools/profile_baseline.py](tools/profile_baseline.py) (headless routing benchmarks + live idle CPU/RSS sampler). See "Performance & Efficiency" |
 | 3D printer integration | [skills/3dprinter.py](skills/3dprinter.py) drop-in skill with a `PrinterBackend` abstraction → **Prusa** (PrusaLink HTTP API v1, stdlib) + **Bambu** (local MQTT LAN mode, lazy `paho-mqtt`). Backend-agnostic voice layer (normalized status/temps dicts): "how's my print" / "how long left" / "nozzle temp" / "pause/resume/cancel the print" (cancel routes through the yes/no confirmation) / "preheat for PETG" / "cool down". Config in `settings.json` `printer` block; self-gates with spoken guidance when unconfigured. Adding OctoPrint/Klipper = one more subclass + `_BACKENDS` entry. Tests in `tests/test_dispatch.py` (load, routing, backend selection, unconfigured/unknown-type guidance, cancel-confirm) |

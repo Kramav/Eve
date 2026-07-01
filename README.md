@@ -70,6 +70,27 @@ not, it doesn't ship.
 - **Python 3.14** (other versions untested)
 - **Node.js 18+** — required to run the Electron UI
 - **[mpv](https://mpv.io/installation/)** — media player used for YouTube playback (must be on PATH)
+- **Two or more monitors — *strongly recommended*** (Eve works with one; see below)
+
+### Multiple monitors (strongly recommended)
+
+Eve runs fine on a single monitor, but it's **meaningfully better with two**, and the reason ties
+directly to the [focus invariant](#philosophy):
+
+- **A second screen is where opened content goes.** When you launch an app or pull up a search result
+  while a game (or any full-attention task) owns your main screen, Eve places that window on the monitor
+  the game *isn't* on — visible *beside* your task instead of behind it. It adapts to whichever screen
+  you're gaming on, so it's always the "other" one.
+- **It's the clean workaround for exclusive-fullscreen games.** A truly exclusive-fullscreen game won't
+  share its screen or its focus — nothing can overlay it. With a second monitor that stops mattering:
+  Eve's windows (and the HUD) live over there, so you get the result without the game ever losing focus
+  or flickering.
+
+**On a single monitor Eve still works** — voice commands, window control, and the overlay HUD all
+function. The trade-off is that an opened window has nowhere to go *but* behind a fullscreen game, and an
+exclusive-fullscreen title may hide the overlay entirely. If you game in **borderless windowed** mode
+(most modern titles), the HUD can still draw over it; exclusive fullscreen is the case a second monitor
+solves.
 
 ---
 

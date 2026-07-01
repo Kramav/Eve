@@ -194,9 +194,12 @@ function showDirectory() {
   const { dirX, dirY } = computeCornerLayout()
   dirWin.setBounds({ x: dirX, y: dirY, width: DIR_W, height: DIR_H })
   const present = () => {
-    dirWin.show()
+    // Focus invariant: the HUD is a glanceable surface — it appears BESIDE the
+    // user's task and must never pull focus off a game. showInactive() shows it
+    // without activating; moveTop() still pops it to front. (Clicking a row/button
+    // focuses the window on demand, so interaction is unaffected.)
+    dirWin.showInactive()
     dirWin.moveTop()   // pop to front on open, but not a sticky top-most pin
-    dirWin.focus()
   }
   if (dirWin._ready) present()
   else                dirWin.once('ready-to-show', present)
@@ -210,13 +213,12 @@ function hideDirectory() {
 }
 
 function toggleDirectory() {
+  // Visibility-based toggle (we no longer rely on focus, per the focus invariant —
+  // the HUD is shown with showInactive() and never holds focus).
   if (!dirWin || dirWin.isDestroyed() || !dirWin.isVisible()) {
-    showDirectory()                 // closed → open
-  } else if (dirWin.isFocused()) {
-    hideDirectory()                 // open & front → close
+    showDirectory()                 // closed → open (beside the task, no focus steal)
   } else {
-    // open but covered/backgrounded → raise it instead of closing (no reposition)
-    dirWin.show(); dirWin.moveTop(); dirWin.focus()
+    hideDirectory()                 // open → close
   }
 }
 
