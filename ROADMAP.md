@@ -175,8 +175,8 @@ API-Keys panel and set `EVE_VISION_BACKENDS=rapidocr,claude` (or `gpt`/`ollama`)
 **Method:** [tools/profile_baseline.py](tools/profile_baseline.py) is the profiling harness (zero deps —
 stdlib + PowerShell). *Part A* (headless micro-benchmarks — routing, catalog build, feature-snapshot
 cost) runs any time with no side effects; *Part B* (idle CPU%/RSS/threads per Eve process) runs while
-Eve is up and idle. Both write a timestamped report to `profiling/`. Run Part B **before** optimizing so
-fixes 1/4/6 below can be ranked by real cost. Optimize against numbers, not intuition. **Guardrail:**
+Eve is up and idle. Both write a timestamped report to `profiling/`. Run Part B to get before/after idle
+numbers for the fixes below. Optimize against numbers, not intuition. **Guardrail:**
 never trade capability or determinism for speed without saying so explicitly. *(Part A already run
 2026-07-01: routing 0.057ms/phrase, feature-snapshot 0.007ms — confirms the understanding path is not a
 bottleneck; the wins are in the UI render loop + polling, below.)*
@@ -217,10 +217,10 @@ profiler; the *diagnosis* is code-confirmed at the cited lines.**
    but minor. **Roadmap correction:** only the *orb* re-asserts; the directory window is intentionally
    *not* always-on-top ([ui/main.js:179-181](ui/main.js#L179)), so the earlier "orb *and* directory"
    note was wrong.
-6. **Directory clock ticks every 1s on a hidden window** —
-   [ui/src/directory/app.js:57-62](ui/src/directory/app.js#L57-L62). The directory is pre-warmed and
-   hidden (not destroyed), so its clock `setTimeout` keeps updating DOM every second even while hidden.
-   Tiny, but a clean "pause work when not visible" fix (gate on `document.visibilityState`).
+6. **DONE — Directory clock updated the DOM every 1s even while hidden.**
+   [ui/src/directory/app.js](ui/src/directory/app.js) — the pre-warmed-but-hidden directory kept
+   re-rendering its clock. **Fixed:** the tick now skips the DOM write when `document.visibilityState`
+   is `hidden` (timer stays alive so it resumes instantly on show). Tiny saving, but free.
 7. **Reminder scheduler re-reads its JSON file every 15s** —
    [commands/reminders.py:352-386](commands/reminders.py#L352-L386). Light (15s interval, `on_change`
    only fires on real change — good), but it does disk read + parse each tick even with zero reminders.
@@ -235,9 +235,14 @@ fallback is genuinely last-resort in `dispatch()` (never speculative); panels ar
 ([ui/src/programs/app.js:27](ui/src/programs/app.js#L27)) only runs while that panel is open (destroyed
 on close), so it's acceptable.
 
-**Still to measure (needs the live profiler — Part B — while Eve runs idle):** actual idle CPU% and RSS
-per process (to *rank* fixes 1/4/6 by real cost), total thread count, and Electron renderer RSS per panel
-(feeds the Foundation question).
+**Remaining (not yet fixed):** #4 (broadcast coalescing) — deferred, it's chatter not CPU and the
+snapshot is cheap (0.007ms), so it needs care to avoid dropping a state a panel needs; #5 (orb 2s
+topmost re-assert) and #7 (reminder 15s file re-read) — minor, and the event-driven rewrites carry more
+risk than their savings justify until the profiler shows they matter.
+
+**Still to measure (needs the live profiler — Part B — while Eve runs idle):** run it **before/after** the
+four fixes above to quantify the idle-CPU drop (especially the orb throttle #1), plus total thread count
+and Electron renderer RSS per panel (feeds the Foundation question).
 
 **Simplify execution paths (without losing capability):** the dispatcher is now registry-driven; continue
 flattening intent priorities cluster-by-cluster (see Architecture → Tier A "Remaining") so literal-match
@@ -550,8 +555,14 @@ verification confirms they actually took. Tiered by daily value × low friction.
 - **Calculator + unit/currency/tip convert** — "what's 15% of 240" / "convert 5
   miles to km" / "how many cups in 2 liters" / "tip on 80 dollars". Local parse,
   no deps (currency rates optional via a free API, cached).
-- **Window quick-actions** — "minimize all" / "show desktop" / "minimize this" /
-  "maximize this" / "always on top". Complements tiling; `ShowWindow` + shell COM.
+- ~~**Window quick-actions**~~ — **DONE** ([skills/window_actions.py](skills/window_actions.py)):
+  "minimize/maximize/restore this", "always on top / unpin", "close this window", "minimize all",
+  "show desktop", "bring my windows back". New Win32 primitives live in
+  [core/window_ops.py](core/window_ops.py) (minimize/maximize/restore/set_topmost/close_window/
+  foreground_hwnd/is_*), so the skill calls helpers not raw `ctypes` (platform guardrail). `PREEMPT`
+  so narrow this-window verbs beat the generic "close &lt;app&gt;" launcher; pronoun forms ("close
+  that", "close it") intentionally left to the core follow-up handler. Side-effecting handlers return
+  `Verified` (re-check window state). Tests: [tests/test_window_actions.py](tests/test_window_actions.py).
 - **Virtual desktops** — "new desktop" / "switch to desktop 2" / "move this to
   desktop 2". `IVirtualDesktopManager` COM (or `Win+Ctrl+←/→` key injection).
 - **Battery & system status** — "how much battery" / "am I charging" / "how's my
@@ -674,6 +685,8 @@ Architecture section).
 
 | Feature | Notes |
 |---------|-------|
+| Window quick-actions skill | [skills/window_actions.py](skills/window_actions.py) drop-in (`PREEMPT`): "minimize/maximize/restore this", "always on top"/"unpin", "close this window", "minimize all", "show desktop", "bring my windows back". New Win32 primitives added to [core/window_ops.py](core/window_ops.py) (minimize/maximize/restore/set_topmost/close_window/foreground_hwnd/is_min/max/topmost/exists/window_title) so the skill uses helpers, not raw ctypes. This-window verbs return `Verified` (re-check state); desktop-wide ones send Win+M/Win+Shift+M/Win+D via `key_ops`. Narrow patterns + pronoun forms left to the core follow-up handler. Tests: [tests/test_window_actions.py](tests/test_window_actions.py) (routing, no-shadow, handler behavior vs a fake desktop) |
+| Engine perf pass #1 | Static audit + 4 idle-cost fixes: orb canvas throttled to ~18fps when idle (was 60fps forever), hot-reload 1s FS poll gated behind `EVE_DEV`, per-command `custom_commands`/`aliases` JSON now mtime-cached, hidden-directory clock stops re-rendering. Profiler harness [tools/profile_baseline.py](tools/profile_baseline.py) (headless routing benchmarks + live idle CPU/RSS sampler). See "Performance & Efficiency" |
 | 3D printer integration | [skills/3dprinter.py](skills/3dprinter.py) drop-in skill with a `PrinterBackend` abstraction → **Prusa** (PrusaLink HTTP API v1, stdlib) + **Bambu** (local MQTT LAN mode, lazy `paho-mqtt`). Backend-agnostic voice layer (normalized status/temps dicts): "how's my print" / "how long left" / "nozzle temp" / "pause/resume/cancel the print" (cancel routes through the yes/no confirmation) / "preheat for PETG" / "cool down". Config in `settings.json` `printer` block; self-gates with spoken guidance when unconfigured. Adding OctoPrint/Klipper = one more subclass + `_BACKENDS` entry. Tests in `tests/test_dispatch.py` (load, routing, backend selection, unconfigured/unknown-type guidance, cancel-confirm) |
 | Command verification (did it actually run?) | `core.response.Verified` wrapper (optimistic message + `check()`/`on_fail`/`retry`/`announce`/`delay`) resolved by [core/verify.py](core/verify.py): waits, checks, **retries once**, reports honestly on failure. Wired into `main.on_command` behind a `verify_commands` feature flag (default on). Verifiers: **app launch** (process appears) with an **adaptive learned per-app delay** in `app_launch_delays.json` — a slow double-launch bumps the wait so it stops double-launching, clean successes trim it, and slow apps get a spoken "this may take a moment"; **app close/kill** (process gone); **window snap** (rect lands in zone ±16px); **printer pause/resume/cancel/preheat/cooldown** (re-query state/targets). Tests: [tests/test_verify.py](tests/test_verify.py) (resolver, delay bump/decay/clamp, printer verifiers with fakes) |
 | YouTube/mpv → skill | Moved YouTube/mpv out of core into self-contained [skills/youtube.py](skills/youtube.py). Entry commands are `PREEMPT` `INTENTS` (new skill-system capability: a skill can opt to run *before* the built-in table, so "open youtube" beats `open_app`); the three former `Mode`-gated dispatchers (`_dispatch_listing`/`_playing`/`_browsing`) are reimplemented via the Converse layer (single `_converse()` routing by `feed`/`list`/`play` state). Core no longer imports `commands.youtube`; `_dispatch_listing` is now web-search-only; `fallback`/`intent_match`/`hot_reload` repointed. Tests updated for the new routing |

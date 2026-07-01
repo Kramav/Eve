@@ -71,6 +71,30 @@ _u32.MonitorFromWindow.restype   = ctypes.c_void_p   # HMONITOR — must not tru
 _shell32.SHQueryUserNotificationState.argtypes = [ctypes.POINTER(ctypes.c_int)]
 _shell32.SHQueryUserNotificationState.restype  = ctypes.c_long  # HRESULT
 
+# Signatures for the window quick-action helpers below.
+_u32.IsZoomed.argtypes           = [wintypes.HWND]
+_u32.IsZoomed.restype            = wintypes.BOOL
+_u32.GetWindowTextW.argtypes     = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+_u32.GetWindowTextW.restype      = ctypes.c_int
+_u32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+_u32.GetWindowTextLengthW.restype  = ctypes.c_int
+_u32.PostMessageW.argtypes       = [wintypes.HWND, wintypes.UINT,
+                                    wintypes.WPARAM, wintypes.LPARAM]
+_u32.PostMessageW.restype        = wintypes.BOOL
+_u32.GetWindowLongW.argtypes     = [wintypes.HWND, ctypes.c_int]
+_u32.GetWindowLongW.restype      = ctypes.c_long
+
+# ShowWindow commands used by the quick-actions
+SW_MAXIMIZE = 3
+SW_MINIMIZE = 6
+SW_RESTORE  = 9
+
+GWL_EXSTYLE     = -20
+WS_EX_TOPMOST   = 0x00000008
+WM_CLOSE        = 0x0010
+_HWND_TOPMOST   = wintypes.HWND(HWND_TOPMOST)
+_HWND_NOTOPMOST = wintypes.HWND(HWND_NOTOPMOST)
+
 # Pseudo-handle constants need to be passed as HWND, not Python ints, so the
 # argtype conversion treats them as the intended special values.
 _HWND_TOP = wintypes.HWND(HWND_TOP)
@@ -169,6 +193,87 @@ def send_to_bottom(hwnd: int) -> bool:
         return False
     return bool(_u32.SetWindowPos(hwnd, wintypes.HWND(HWND_BOTTOM),
                                   0, 0, 0, 0, _SWP))
+
+
+# ── Window quick-actions (used by skills/window_actions.py) ──────────────────
+# Thin, single-purpose Win32 wrappers so skills call helpers, not raw ctypes
+# (per the platform guardrail). All take a plain int hwnd and are no-ops on a
+# dead handle.
+
+def foreground_hwnd() -> int:
+    """The window the user is currently working in (0 if none). Eve's own orb is
+    focusable=False and its panels show inactive, so this stays the user's app."""
+    return int(_u32.GetForegroundWindow() or 0)
+
+
+def window_title(hwnd: int) -> str:
+    """Best-effort window title text ('' if none/dead)."""
+    if not hwnd or not _u32.IsWindow(hwnd):
+        return ''
+    n = _u32.GetWindowTextLengthW(hwnd)
+    if n <= 0:
+        return ''
+    buf = ctypes.create_unicode_buffer(n + 1)
+    _u32.GetWindowTextW(hwnd, buf, n + 1)
+    return buf.value
+
+
+def exists(hwnd: int) -> bool:
+    """True if *hwnd* is still a live window (used to verify a close took)."""
+    return bool(hwnd and _u32.IsWindow(hwnd))
+
+
+def is_minimized(hwnd: int) -> bool:
+    return bool(hwnd and _u32.IsWindow(hwnd) and _u32.IsIconic(hwnd))
+
+
+def is_maximized(hwnd: int) -> bool:
+    return bool(hwnd and _u32.IsWindow(hwnd) and _u32.IsZoomed(hwnd))
+
+
+def is_topmost(hwnd: int) -> bool:
+    if not hwnd or not _u32.IsWindow(hwnd):
+        return False
+    return bool(_u32.GetWindowLongW(hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST)
+
+
+def minimize(hwnd: int) -> bool:
+    if not hwnd or not _u32.IsWindow(hwnd):
+        return False
+    _u32.ShowWindow(hwnd, SW_MINIMIZE)
+    return True
+
+
+def maximize(hwnd: int) -> bool:
+    if not hwnd or not _u32.IsWindow(hwnd):
+        return False
+    _u32.ShowWindow(hwnd, SW_MAXIMIZE)
+    return True
+
+
+def restore(hwnd: int) -> bool:
+    """Un-minimize / un-maximize back to normal size."""
+    if not hwnd or not _u32.IsWindow(hwnd):
+        return False
+    _u32.ShowWindow(hwnd, SW_RESTORE)
+    return True
+
+
+def set_topmost(hwnd: int, on: bool) -> bool:
+    """Pin/unpin *hwnd* above all normal windows (WS_EX_TOPMOST). Does not steal
+    focus (SWP_NOACTIVATE)."""
+    if not hwnd or not _u32.IsWindow(hwnd):
+        return False
+    target = _HWND_TOPMOST if on else _HWND_NOTOPMOST
+    return bool(_u32.SetWindowPos(hwnd, target, 0, 0, 0, 0, _SWP))
+
+
+def close_window(hwnd: int) -> bool:
+    """Politely ask *hwnd* to close (WM_CLOSE — same as clicking the X; the app
+    can still prompt to save). Not a force-kill."""
+    if not hwnd or not _u32.IsWindow(hwnd):
+        return False
+    return bool(_u32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
 
 
 if __name__ == '__main__':
