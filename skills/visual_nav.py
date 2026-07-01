@@ -80,6 +80,10 @@ class InputController:
     def scroll(self, amount):
         pyautogui.scroll(amount)
 
+    def drag(self, x1, y1, x2, y2, button="left"):
+        pyautogui.moveTo(x1, y1, duration=0.1)
+        pyautogui.dragTo(x2, y2, duration=0.35, button=button)
+
     def type_text(self, text):
         key_ops.type_text(text)
 
@@ -231,6 +235,16 @@ class NavigationPlanner:
             self.input.click(cx, cy)
         return el
 
+    def drag(self, n1, n2):
+        """Drag element n1 onto element n2 (both 1-based). Returns (src, dst)."""
+        els = self.elements()
+        if not els or not (1 <= n1 <= len(els)) or not (1 <= n2 <= len(els)):
+            return None
+        src, dst = els[n1 - 1], els[n2 - 1]
+        self.input.drag(src["center"][0], src["center"][1],
+                        dst["center"][0], dst["center"][1])
+        return (src, dst)
+
 
 _planner = NavigationPlanner()
 
@@ -279,6 +293,12 @@ def _parse(text: str):
                  r"(?:links?|elements?|items?|options?|videos?|results?|buttons?)\b"
                  r"|\bwhat'?s\s+clickable\b|\b(?:refresh|rescan|re-?scan)\b", t):
         return ("list",)
+
+    # Drag element A onto element B: "drag number 2 to number 5" / "drag 1 onto 3".
+    m = re.search(r"\bdrag\s+(?:number\s+|item\s+)?(\d+)\s+"
+                  r"(?:to|onto|into|on|over)\s+(?:number\s+|item\s+)?(\d+)\b", t)
+    if m:
+        return ("drag", int(m.group(1)), int(m.group(2)))
 
     # Selection sub-action (applies to "double click number 2" / "right click 3")
     sub = "double" if re.search(r"\bdouble[-\s]?click\b", t) else \
@@ -379,6 +399,17 @@ def _do_select(n: int, sub: str):
     return f"{verb} {el['label']}."
 
 
+def _do_drag(n1: int, n2: int):
+    els = _planner.elements()
+    if not els:
+        return "I don't have a list yet — say 'what can I click' first."
+    pair = _planner.drag(n1, n2)
+    if pair is None:
+        return f"Pick two numbers between 1 and {len(els)}."
+    src, dst = pair
+    return f"Dragged {src['label']} onto {dst['label']}."
+
+
 _DESC_THRESHOLD = 70   # rapidfuzz token_set_ratio cutoff for spoken description
 
 
@@ -449,6 +480,8 @@ def handle(text: str):
         return _do_select(action[1], action[2])
     if kind == "select_desc":
         return _do_select_desc(action[1], action[2])
+    if kind == "drag":
+        return _do_drag(action[1], action[2])
     return _apply_input(action)
 
 

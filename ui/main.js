@@ -45,7 +45,8 @@ function getOrbDisplay() {
   return screen.getPrimaryDisplay()
 }
 
-const ORB_SIZE = 96
+const ORB_SIZE = 96                 // base orb size at 100% UI scale
+let _orbSize = ORB_SIZE             // scaled at startup from _uiScale (1440p/4K)
 const ORB_MARGIN = 10
 const DIR_W = 700, DIR_H = 520
 const DIR_GAP = 10  // gap between orb and directory
@@ -64,10 +65,10 @@ function computeCornerLayout() {
   const [v, h] = corner.split('-')
 
   const orbX = h === 'right'
-    ? x + width  - ORB_SIZE - ORB_MARGIN
+    ? x + width  - _orbSize - ORB_MARGIN
     : x + ORB_MARGIN
   const orbY = v === 'bottom'
-    ? y + height - ORB_SIZE - ORB_MARGIN
+    ? y + height - _orbSize - ORB_MARGIN
     : y + ORB_MARGIN
 
   const dirX = h === 'right'
@@ -76,7 +77,7 @@ function computeCornerLayout() {
   // For top corners directory sits BELOW the orb; for bottom corners ABOVE.
   const dirY = v === 'bottom'
     ? orbY - DIR_H - DIR_GAP
-    : orbY + ORB_SIZE + DIR_GAP
+    : orbY + _orbSize + DIR_GAP
 
   return { orbX, orbY, dirX, dirY }
 }
@@ -126,9 +127,21 @@ function createTray() {
 
 // ── Orb window ────────────────────────────────────────────────────────────────
 
+// Grow the orb (window + rendered content) with the UI scale so it isn't tiny
+// on 1440p/4K. Called at startup and when the UI-size slider changes.
+function _applyOrbScale() {
+  _orbSize = Math.round(ORB_SIZE * _uiScale)
+  if (orbWin && !orbWin.isDestroyed()) {
+    orbWin.setSize(_orbSize, _orbSize)
+    try { orbWin.webContents.setZoomFactor(_uiScale) } catch (_) {}
+    positionOrb()
+  }
+}
+
 function createOrbWin() {
+  _orbSize = Math.round(ORB_SIZE * _uiScale)
   orbWin = new BrowserWindow({
-    width: 96, height: 96,
+    width: _orbSize, height: _orbSize,
     frame: false, transparent: true,
     alwaysOnTop: true, skipTaskbar: true, resizable: false,
     focusable: false,
@@ -139,6 +152,10 @@ function createOrbWin() {
   orbWin.setAlwaysOnTop(true, 'screen-saver', 1)
   orbWin.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   orbWin.loadFile(path.join(__dirname, 'src', 'index.html'))
+  // Scale the rendered orb to fill the enlarged window.
+  orbWin.webContents.on('did-finish-load', () => {
+    try { orbWin.webContents.setZoomFactor(_uiScale) } catch (_) {}
+  })
   positionOrb()
   orbWin.on('close', e => { if (!app.isQuitting) e.preventDefault() })
   // Windows demotes topmost flags when a fullscreen app takes focus.
@@ -1159,6 +1176,7 @@ ipcMain.on('set-ui-scale', (_e, v) => {
   _uiScale = Math.min(2.0, Math.max(0.8, Number(v) || 1.0))
   _persistUiScale(_uiScale)
   _applyUiScaleToOpenPanels()
+  _applyOrbScale()          // the orb tracks the UI scale too
 })
 
 app.whenReady().then(() => {

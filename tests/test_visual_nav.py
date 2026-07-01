@@ -32,12 +32,15 @@ class _FakeInput:
         self.clicks = []
         self.moves = []
         self.scrolls = []
+        self.drags = []
     def click(self, x=None, y=None, button="left", clicks=1):
         self.clicks.append((x, y, button, clicks))
     def move_rel(self, dx, dy):
         self.moves.append((dx, dy))
     def scroll(self, amount):
         self.scrolls.append(amount)
+    def drag(self, x1, y1, x2, y2, button="left"):
+        self.drags.append((x1, y1, x2, y2, button))
     def type_text(self, text):
         self.typed = text
     def hotkey(self, combo):
@@ -98,6 +101,12 @@ def test_parse_select_by_description():
     assert vn._parse("click here") == ("click", "left", 1)
 
 
+def test_parse_drag():
+    assert vn._parse("drag number 2 to number 5") == ("drag", 2, 5)
+    assert vn._parse("drag 1 onto 3") == ("drag", 1, 3)
+    assert vn._parse("drag item 4 over 2") == ("drag", 4, 2)
+
+
 # ── Planner ────────────────────────────────────────────────────────────────────
 
 def test_planner_clicks_element_center():
@@ -108,6 +117,14 @@ def test_planner_clicks_element_center():
     assert p.act(99) is None                          # out of range
     p.act(1, "double")
     assert p.input.clicks[-1][3] == 2                  # double = 2 clicks
+
+
+def test_planner_drag_between_elements():
+    p = _fake_planner()
+    pair = p.drag(1, 2)                                # drag element 1 → element 2
+    assert pair and pair[0]["label"] == "First link" and pair[1]["label"] == "Second link"
+    assert p.input.drags[-1] == (60, 35, 60, 75, "left")   # src center → dst center
+    assert p.drag(1, 9) is None                        # out-of-range target declines
 
 
 def test_planner_caches_until_key_changes():

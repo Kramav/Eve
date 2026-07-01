@@ -89,6 +89,9 @@ def _snap_monitor_only(app, monitor):       return tiling.snap_app(app, 'full', 
 # "move hud to top-left of monitor 1" — snap the directory panel into a named
 # zone on a specific monitor (the 'move' verb otherwise just relocates the orb).
 def _snap_hud_zone_monitor(zone, monitor):  return tiling.snap_app('hud', zone, monitor)
+# Voice "why did you do that" → explain the PREVIOUS built-in routing. Defined
+# here (before INTENTS) so the table can reference it; explain_last() below.
+def _explain_last_intent():                 return explain_last()
 
 
 # (regex pattern, handler) — first match wins, captured groups passed as args
@@ -111,6 +114,11 @@ INTENTS = [
     (r"kill (?:the )?window manager",                           system.close_window_manager),
 
     # ── Non-specific follow-ups (must come before snap / open_app) ────────
+    # Intent Explanation — "why did you do that" explains the previous routing.
+    (r"\bwhy\s+(?:did|do)\s+(?:you|eve)\s+(?:do|say|pick|choose|route)\s+that\b"
+     r"|\bwhy\s+that\s+(?:command|one|action|routing)\b"
+     r"|\bexplain\s+(?:that|your\s+(?:choice|routing|last\s+(?:command|routing)))\b"
+     r"|\bhow\s+did\s+you\s+(?:understand|interpret)\s+that\b",                            _explain_last_intent),
     (r"\b(?:go\s+back|undo(?:\s+that)?|revert(?:\s+that)?)\b",                             ctx_cmd.undo),
     (r"\bclose\s+(?:that(?:\s+window)?|it|the\s+(?:last\s+)?window)\b",                    ctx_cmd.close_last),
     (r"\bcancel\s+(?:that|it|the\s+last\s+(?:one|thing))\b",                               ctx_cmd.cancel_last),
@@ -684,6 +692,35 @@ def _handle_converse(text: str):
     return result
 
 
+# Built-in intents wrapped once in the scored registry (Tier A). Replaces the
+# old "list position encodes priority" first-match loop with priority +
+# literal-match specificity — order-independent. Built lazily so it captures
+# INTENTS *after* the bare-z-order splice at import. Behaviour is identical to
+# the old loop (no feature gating here, matching prior behaviour); proven by
+# tests/test_intent_registry_parity.py. To start gating built-ins, pass
+# feature_get=_features.get to .best() — a deliberate, separate change.
+_REGISTRY = None
+def _registry():
+    global _REGISTRY
+    if _REGISTRY is None:
+        from core.intent_registry import from_intents
+        _REGISTRY = from_intents(INTENTS, _HANDLER_FEATURE)
+    return _REGISTRY
+
+
+# Last text routed through the built-in registry — powers explain_last() (the
+# Intent Explanation transparency feature). Recording only; no routing effect.
+_LAST_TEXT = None
+
+
+def explain_last() -> str:
+    """Human phrasing of why the last built-in-routed command matched the way it
+    did (winner, why it won, other candidates). For a spoken 'why did you do that'."""
+    if _LAST_TEXT is None:
+        return "I haven't routed a command yet."
+    return _registry().explain_str(_LAST_TEXT)
+
+
 def dispatch(text: str):
     text = text.strip().lower()
     text = re.sub(r"[.,!?]+$", "", text).strip()  # strip trailing punctuation Whisper adds
@@ -743,12 +780,18 @@ def dispatch(text: str):
     if pre is not None:
         return pre
 
-    # Built-in intents
-    for pattern, handler in INTENTS:
-        m = re.search(pattern, text)
-        if m:
-            groups = m.groups()
-            return handler(*groups) if groups else handler()
+    # Built-in intents — resolved via the scored registry (order-independent).
+    # Behaviour-identical to the old first-match loop; see test_intent_registry_parity.
+    hit = _registry().best(text)
+    if hit is not None:
+        _intent, m = hit
+        # Record for explain_last(), but never let the "why did you do that"
+        # query overwrite the command it's asking about.
+        if _intent.handler is not _explain_last_intent:
+            global _LAST_TEXT
+            _LAST_TEXT = text
+        groups = m.groups()
+        return _intent.handler(*groups) if groups else _intent.handler()
 
     # Drop-in skills (skills/*.py) — extend the built-ins without editing core.
     # Tried after built-ins so they add commands rather than override them.

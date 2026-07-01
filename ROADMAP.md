@@ -23,7 +23,7 @@ Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2**
 ### 3. Plugin/skill system — *DONE*
 ~~Adding a new command required editing `core/dispatcher.py`.~~ **Done:** [core/skills.py](core/skills.py) imports every `skills/*.py` at startup (`skills.load(display)` from main.py) and collects each file's module-level `INTENTS` list (same `(regex, handler)` shape as built-ins). Optional `PRIORITY` (ordering among skills), `FEATURE` (gate on features.json), and `setup(display)` hook. Skill intents are tried in `dispatch()` after built-ins and before the fuzzy/LLM fallback, so they extend without overriding. Import/handler errors are caught + logged so one bad skill can't crash Eve. Ships with [skills/example_dice.py](skills/example_dice.py) (roll/flip) + [skills/README.md](skills/README.md). Tests: `test_skill_loading`, `test_skill_integration_through_dispatch`. This also supersedes P3 "Skill entry points" (file-drop is simpler than pyproject entry points for this use case).
 
-**Related smell — the dispatcher is a hand-ordered ~350-line regex wall.** Still true for *built-in* intents (skills don't need it — they're priority-ordered). Interim guard added: `test_all_intents_compile_and_are_callable` fails on a typo'd pattern or misreferenced handler. A full "no two patterns both match canonical phrase X" self-check is still worth adding if the built-in table keeps growing.
+**Related smell — the dispatcher is a hand-ordered ~350-line regex wall.** Still true for *built-in* intents (skills don't need it — they're priority-ordered). Interim guards: `test_all_intents_compile_and_are_callable` fails on a typo'd pattern or misreferenced handler; **[tests/test_intent_audit.py](tests/test_intent_audit.py)** is the "no two patterns both match phrase X" self-check — it asserts each canonical phrase's intended handler wins *first*, and fails when a **new** order-dependent phrase appears (multiple handlers match, only ordering saves it). It already documents the current fragility: all five "open &lt;panel&gt;" commands also match `apps.open_app` (reorder them below it and "open app manager" tries to launch an app), plus "hide interface" (toggle vs hide_directory) and "snap X to top" (snap vs bring-to-front). This is the groundwork/evidence base for the Tier-A registry rework (P3 Architecture) — you now know exactly which overlaps a scored registry has to preserve.
 
 ### 3a. Delete the duplicate pre-dispatch routing in `main.py` — *DONE*
 ~~`main.py`'s `on_command` ran 7 hardcoded regex blocks before `dispatch()`, shadowing INTENTS.~~ **Done:** the 7 blocks + regex constants are deleted; `dispatch()` is now the single routing authority. New `core.response.Panel` (subclass of `Silent`) marks panel open/close/toggle actions so main.py hides the HUD immediately and doesn't speak — preserving the former silent + delay-0 UX. New `system.toggle_overlay` + a top-of-INTENTS toggle intent preserve the "show/hide/bare hud toggles the overlay" behavior; voice-settings + app-manager intents broadened to absorb the bare "voice settings" / "manage apps" / "open apps" forms. Routing tests updated (`test_directory_and_identify`, `test_consolidated_panel_routing`) — they now assert the *real* app behavior instead of the old dead-code path. Residual intentional in-dispatcher overlap (toggle above show/hide for hud) is by design and is what the #3 startup self-check would whitelist.
@@ -97,8 +97,10 @@ Provider-based, planner-selected:
   (`_SOM_PROMPT`) and `_elements_from_marks` maps back to the OCR geometry — no coordinate hallucination.
   Falls back to direct box-detection when OCR yields nothing. Use via `EVE_VISION_BACKENDS=claude` (OCR runs
   inside the cloud tier). Tests in [tests/test_vision.py](tests/test_vision.py).
-- **Phase 2 remaining** — `OnnxUiBackend` model + setup download (2d); drag-and-drop; larger marker font
-  for set-of-marks readability at downscaled sizes.
+- **Drag-and-drop** *(done)* — `InputController.drag` (pyautogui moveTo→dragTo) + `NavigationPlanner.drag(n1,n2)`
+  + parser `("drag", n1, n2)` ("drag number 2 to number 5"). Tests in [tests/test_visual_nav.py](tests/test_visual_nav.py).
+- **Phase 2 remaining** — `OnnxUiBackend` model + setup download (2d); larger marker font for set-of-marks
+  readability at downscaled sizes; drag-by-description (numeric/ordinal only today).
 
 Tests: [tests/test_visual_nav.py](tests/test_visual_nav.py) (parser/planner/handler/select-by-desc) +
 [tests/test_vision.py](tests/test_vision.py) (cascade order, key resolution, JSON parse + scaling,
@@ -127,6 +129,118 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
   `RESEARCH.md` and promotes findings to ROADMAP.md. Blocked on: setting up GitHub PAT in cloud env.
 
 ### Architecture
+- **Intent engine rework** — replace the hand-ordered `INTENTS` regex wall (the P0 #3 smell) with a
+  proper local intent engine, in two tiers. Reframe: runtime isn't the problem (50 regex scans =
+  microseconds) — the pain is *order-encodes-priority fragility* ("protect X" must sit above "snap X"
+  above "open X") and paraphrase misses.
+  - **Tier A — declarative intent registry (zero new deps, do first).** Each intent declares its own
+    `priority`/specificity, patterns, slots, and feature gate as data; the matcher scores all and picks
+    the best instead of first-match-wins. Kills the fragile ordering, adds a startup "no two intents
+    claim the same canonical phrase" self-check (the guard #3 already wants). Slots stay regex (what
+    regex is good at). Deterministic; guarded by the existing `tests/test_dispatch.py`. **Caveat:**
+    highest blast-radius change in the repo — do it incrementally behind the routing tests.
+    **Core landed (standalone, not yet wired):** [core/intent_registry.py](core/intent_registry.py) —
+    `Intent` dataclass (patterns + priority + feature + slots + learning metadata: source/confidence/
+    successes/failures/provenance) and `IntentRegistry` with a scored matcher (priority desc → fewest
+    wildcard-captured chars, i.e. most literal → stable order). [tests/test_intent_registry.py](tests/test_intent_registry.py)
+    proves routing is **registration-order-independent** (panel beats `open_app` first- or last-added),
+    resolves the audit's "snap X to top" case by literal-match specificity, and covers feature gating +
+    the learning counters. **Migration bridge landed:** `intent_registry.from_intents(INTENTS)` builds a
+    registry from the live list with position→priority (semantics-preserving), and
+    [tests/test_intent_registry_parity.py](tests/test_intent_registry_parity.py) **proves it routes
+    identically to the current first-match loop across 60 phrases** — so swapping `dispatch()`'s
+    `for … in INTENTS` loop for `registry.resolve()` is now a small, provably behaviour-preserving diff.
+    **WIRED INTO dispatch():** the old `for ... in INTENTS` first-match loop is replaced by
+    `_registry().best(text)` (lazy module-level registry from `from_intents(INTENTS, _HANDLER_FEATURE)`).
+    Behaviour-identical (no built-in feature gating, matching prior behaviour) — full suite green incl.
+    `test_dispatch`'s 32 routing assertions. `INTENTS` stays the source of truth (patterns unchanged); only
+    the *matching strategy* changed from list position to priority + literal-match specificity.
+    **Remaining (polish, optional):** (1) flatten priorities cluster-by-cluster so literal specificity
+    takes over and the audit's order-dependent set shrinks toward empty; (2) optionally enable built-in
+    feature gating by passing `feature_get=_features.get` to `.best()` (a deliberate behaviour change —
+    built-ins don't currently gate at the dispatch loop).
+  - **Tier B — local semantic fallback (opt-in, CPU).** Swap the fuzzy tier (`core/intent_match.py`,
+    lexical rapidfuzz `token_set_ratio`) for a local sentence-embedding classifier (MiniLM via
+    `onnxruntime`, ~80MB, CPU-ms — reuses the vision stack's optional onnxruntime dep). Embeds the
+    utterance → cosine-sim vs. a few example phrases per intent → runs that intent's regex slot
+    extractor. Real paraphrase handling ("could you throw firefox on my left screen") while staying
+    local and only firing when regex misses. Keep Ollama tool-calling as the last resort. **Caveat:**
+    trades a little determinism for coverage; it's an addition, not a replacement, and only classifies
+    intent (slots stay regex). Gate behind a feature flag + optional dep like the vision tiers.
+  - Not chosen: Snips NLU (purpose-built for offline assistants but abandoned ~2020, painful install),
+    Rasa (heavy server + TF), spaCy Matcher/textcat (clean but a real dep + training data for marginal
+    gain over Tier A). Start with Tier A; add Tier B only if daily-use paraphrase misses justify it.
+- **Dynamic Intent Learning — verified adaptive training** *(big bet; builds directly on the Intent
+  engine rework above — Tier A is its prerequisite).* Eve learns from **verified successful** LLM-fallback
+  interactions so the local engine becomes the primary path and LLM inference grows rare over time.
+  **Core principle: never learn from an LLM response alone — only from verified outcomes.** The LLM is a
+  *teacher* that interprets unfamiliar requests; verified execution + user feedback are the real learning.
+  - **Pipeline:** manual matcher → learned intents → learned aliases → LLM fallback (last resort); first
+    success wins. Inserts *persisted, per-user learned tiers* between today's regex/skills and the Ollama fallback.
+  - **Promotion pipeline (not "auto-learning") — nothing jumps from an LLM response into the primary registry.**
+    Each mapping climbs a ladder with explicit entry criteria per stage:
+    `Unknown → LLM Candidate → Verified Candidate → Trusted Candidate → Primary Intent`.
+    LLM output is a *candidate interpretation*; only accumulated verified evidence advances a stage.
+  - **Verification (3 tiers — reuse existing infra):** T1 system verification = extend the existing
+    `verify_commands` / `core.response.Verified` side-effect checks (highest confidence). T2 explicit feedback
+    = a "yes / that worked / 👍" vs "no / undo / 👎" vocabulary on the existing confirm+converse layer
+    (negative feedback blocks learning). T3 implicit = user continues without correcting (moderate).
+  - **Multi-metric confidence (not one score).** Track independent signals per mapping — interpretation
+    confidence, execution-success rate, explicit-confirmation count, frequency, recency, failure rate — and
+    make **promotion decisions weigh all of them**, never a single percentage. (A high one-off confidence with
+    a recent failure must not promote.)
+  - **Two separate learning tracks, different promotion rules:**
+    - **Language learning** — aliases / phrase variations / STT & spelling corrections that map to an
+      **existing** intent ("nuke chrome" → close chrome). Low-risk, faster promotion; this is the common case.
+    - **Capability / workflow learning (Teach Mode)** — recording a **new multi-step workflow** ("prepare my
+      morning workspace") into a reusable callable intent. Higher bar: explicit build + confirmation, and each
+      constituent action still obeys its own class guardrails.
+  - **Interactive confirmation:** below the promotion bar, Eve states its interpretation and asks before
+    permanently learning ("I read that as warm-white @35% — correct?"). Reject → don't learn, record the miss, clarify.
+  - **Capability awareness:** distinguish (1) unknown intent, (2) known intent / unsupported capability,
+    (3) known intent / missing integration — every failure says *why* (understanding vs capability vs
+    integration), never a dead end. When it's (2)/(3), offer Teach Mode instead of a dead end.
+  - **Provenance + Intent Explanation.** Every learned mapping must answer **"Why does Eve believe this?"** —
+    origin (LLM fallback / Teach Mode / user-created), successful-execution count, confirmations, promotion
+    date, last failure, current pipeline stage. Surfaced as an **Intent Explanation** feature: "why did you do
+    that?" / "why do you think X means Y" → what matched, the metric breakdown, #successful executions, and
+    origin. Non-negotiable for a self-modifying system — it's what makes drift debuggable and trustworthy.
+    **Engine landed:** `IntentRegistry.explain()` / `explain_str()` report the winning intent, WHY it won
+    (priority vs literal-match vs sole match), every shadowed candidate, and each intent's provenance/learning
+    metadata; `dispatcher.explain_last()` records the last built-in-routed text so a spoken "why did you do
+    that" can explain it. Tests in [tests/test_intent_registry.py](tests/test_intent_registry.py) +
+    an integration check in [tests/test_intent_registry_parity.py](tests/test_intent_registry_parity.py).
+    **Voice command landed:** "why did you do that" / "explain that" / "how did you interpret that" →
+    `_explain_last_intent` → `explain_last()`, explaining the *previous* routing (guarded so the meta-query
+    never overwrites the command it asks about). **Remaining:** extend explanation to learned mappings once they exist.
+  - **Reuse anchors:** Tier-A registry (**learned intents are just data added at runtime — this is why Tier A
+    is a hard prerequisite**); Tier-B embeddings (the Intent Clustering engine that dedupes semantically
+    identical learned phrases); [commands/fallback.py](commands/fallback.py) (LLM Fallback Engine — already
+    Ollama tool-calling; needs structured candidate output); `verify_commands`/`Verified` (Execution Verifier);
+    converse/`pending_confirm` (Feedback Manager); Ollama idle/nightly/on-demand for background promotion
+    (must never block command responsiveness).
+  - **Guardrails (the "implications" — this converts a deterministic table into a living, self-modifying dataset):**
+    - **Safety is class-based, not confidence-based.** Destructive / sensitive intent *classes* — delete,
+      shutdown, kill/close, messaging, purchases, financial actions — are **never** auto-promoted and **always**
+      require explicit confirmation, *even at 99% confidence*. **Critically: an LLM interpretation alone never
+      executes a destructive action** — when the LLM fallback resolves a destructive command, Eve confirms with
+      the user before executing, and keeps confirming until that intent has been safely learned + promoted
+      through the normal verified pipeline. Confidence gates *language* learning; it never overrides *class* safety.
+    - **Privacy:** stores every utterance + the user's profile — local-only (fits the Windows-first/offline
+      ethos) but persistent PII; needs retention/redaction (ties to the Discord-redaction rule) + a forget/reset
+      path (extends the Memory panel's edit/reset patterns).
+    - **Single-user, firm.** No cross-user sharing — language is highly personal, and the model must be proven
+      locally first. Multi-user (`user_id`, shared generic improvements) is explicitly deferred, not planned;
+      keeping it out now drops profiles/sharing and much of the module count.
+  - **Phasing (each ships value; stop where payoff plateaus):** (0) Tier-A registry [prereq] → (1) structured
+    LLM candidate + Execution Verifier on the existing Ollama fallback → (2) training store + multi-metric
+    confidence + interactive confirmation + provenance → (3) **language-track** promotion of *safe* intent
+    classes + learned aliases → (4) Intent Explanation feature → (5) **capability-track** Teach Mode workflows →
+    (6) clustering/dedup via Tier-B embeddings → (7) background Ollama promotion (idle/nightly).
+  - **Modules (independently replaceable):** Manual Matcher · Language Learner · Alias Generator · LLM Fallback
+    Engine · Execution Verifier · Feedback Manager · Multi-metric Confidence Engine · Promotion Manager ·
+    Provenance / Intent Explainer · Intent Clustering · Training Dataset Manager · Workflow Recorder (Teach
+    Mode) · Capability Registry · Ollama Training Service.
 - **STT abstraction layer** — abstract `core/transcriber.py` behind an `STTEngine` interface.
   Allows swapping Whisper for Vosk (faster/smaller) or cloud STT via config, no code change.
   **Deferred (YAGNI):** there is exactly one STT implementation today; build the interface when a
@@ -146,9 +260,12 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
   with a confirmation prompt rather than executing blindly. (Partly done — see `intent_match.py`
   tiered confidence; could be extended to in-pipeline intents.)
 - **Larger UI on high-res displays** — *DONE: panels auto-zoom on 1440p (1.25×) / 4K (1.5×) via
-  `webContents.setZoomFactor` (global `web-contents-created` hook gated to panel folders; orb/directory/
-  tag overlays excluded). App Manager **UI SIZE** slider (0.8–2.0×) live-applies + persists to
-  `settings.json` `ui_scale`. `ui/main.js`, `ui/preload.js`, `ui/src/app-manager`.* Original note: increase UI text size and maybe general UI size for 2560×1440p
+  `webContents.setZoomFactor` (global `web-contents-created` hook gated to panel folders; directory/
+  tag overlays excluded). The **orb** now also scales — `_orbSize = ORB_SIZE × _uiScale` + content
+  zoom (`_applyOrbScale`), live-updating with the slider. App Manager **UI SIZE** slider (0.8–2.0×)
+  live-applies + persists to `settings.json` `ui_scale`. `ui/main.js`, `ui/preload.js`, `ui/src/app-manager`.*
+  Remaining: the routing directory panel overlay still uses fixed geometry (scale it if 4K users report it small).
+  Original note: increase UI text size and maybe general UI size for 2560×1440p
   (and higher). The Electron panels use fixed `px` font sizes/dimensions tuned for ~1080p, so they
   read small on 1440p/4K. Options: a UI-scale setting (App Manager slider → CSS root font-size /
   zoom factor), or auto-scale off `screen` DPI/resolution. Affects every `ui/src/*` panel + the
