@@ -700,6 +700,19 @@ def _registry():
     return _REGISTRY
 
 
+# Last text routed through the built-in registry — powers explain_last() (the
+# Intent Explanation transparency feature). Recording only; no routing effect.
+_LAST_TEXT = None
+
+
+def explain_last() -> str:
+    """Human phrasing of why the last built-in-routed command matched the way it
+    did (winner, why it won, other candidates). For a spoken 'why did you do that'."""
+    if _LAST_TEXT is None:
+        return "I haven't routed a command yet."
+    return _registry().explain_str(_LAST_TEXT)
+
+
 def dispatch(text: str):
     text = text.strip().lower()
     text = re.sub(r"[.,!?]+$", "", text).strip()  # strip trailing punctuation Whisper adds
@@ -761,6 +774,8 @@ def dispatch(text: str):
 
     # Built-in intents — resolved via the scored registry (order-independent).
     # Behaviour-identical to the old first-match loop; see test_intent_registry_parity.
+    global _LAST_TEXT
+    _LAST_TEXT = text
     hit = _registry().best(text)
     if hit is not None:
         _intent, m = hit

@@ -85,6 +85,16 @@ def test_registry_parity_with_first_match_loop():
         f"  {p!r}: registry={g}  first-match={w}" for p, g, w in mismatches)
 
 
+def test_explain_last_after_dispatch():
+    # dispatch a side-effect-free built-in, then ask why it routed that way.
+    from core import session as S
+    S.reset()
+    d.dispatch("what time is it")          # → system.get_time (returns a string)
+    explanation = d.explain_last()
+    assert "get_time" in explanation, explanation
+    S.reset()
+
+
 def test_bridge_preserves_priority_order():
     # Position → strictly descending priority, so the sort is exactly list order.
     reg = from_intents(d.INTENTS)

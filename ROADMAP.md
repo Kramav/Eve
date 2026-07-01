@@ -150,9 +150,15 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
     [tests/test_intent_registry_parity.py](tests/test_intent_registry_parity.py) **proves it routes
     identically to the current first-match loop across 60 phrases** — so swapping `dispatch()`'s
     `for … in INTENTS` loop for `registry.resolve()` is now a small, provably behaviour-preserving diff.
-    **Remaining:** (1) do that swap behind test_dispatch + test_intent_audit + the parity test; (2) then
-    flatten priorities cluster-by-cluster so literal-match specificity takes over, watching the audit
-    shrink its order-dependent set toward empty.
+    **WIRED INTO dispatch():** the old `for ... in INTENTS` first-match loop is replaced by
+    `_registry().best(text)` (lazy module-level registry from `from_intents(INTENTS, _HANDLER_FEATURE)`).
+    Behaviour-identical (no built-in feature gating, matching prior behaviour) — full suite green incl.
+    `test_dispatch`'s 32 routing assertions. `INTENTS` stays the source of truth (patterns unchanged); only
+    the *matching strategy* changed from list position to priority + literal-match specificity.
+    **Remaining (polish, optional):** (1) flatten priorities cluster-by-cluster so literal specificity
+    takes over and the audit's order-dependent set shrinks toward empty; (2) optionally enable built-in
+    feature gating by passing `feature_get=_features.get` to `.best()` (a deliberate behaviour change —
+    built-ins don't currently gate at the dispatch loop).
   - **Tier B — local semantic fallback (opt-in, CPU).** Swap the fuzzy tier (`core/intent_match.py`,
     lexical rapidfuzz `token_set_ratio`) for a local sentence-embedding classifier (MiniLM via
     `onnxruntime`, ~80MB, CPU-ms — reuses the vision stack's optional onnxruntime dep). Embeds the
@@ -199,6 +205,12 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
     date, last failure, current pipeline stage. Surfaced as an **Intent Explanation** feature: "why did you do
     that?" / "why do you think X means Y" → what matched, the metric breakdown, #successful executions, and
     origin. Non-negotiable for a self-modifying system — it's what makes drift debuggable and trustworthy.
+    **Engine landed:** `IntentRegistry.explain()` / `explain_str()` report the winning intent, WHY it won
+    (priority vs literal-match vs sole match), every shadowed candidate, and each intent's provenance/learning
+    metadata; `dispatcher.explain_last()` records the last built-in-routed text so a spoken "why did you do
+    that" can explain it. Tests in [tests/test_intent_registry.py](tests/test_intent_registry.py) +
+    an integration check in [tests/test_intent_registry_parity.py](tests/test_intent_registry_parity.py).
+    **Remaining:** a voice intent that calls `explain_last()`, and extending it to learned mappings once they exist.
   - **Reuse anchors:** Tier-A registry (**learned intents are just data added at runtime — this is why Tier A
     is a hard prerequisite**); Tier-B embeddings (the Intent Clustering engine that dedupes semantically
     identical learned phrases); [commands/fallback.py](commands/fallback.py) (LLM Fallback Engine — already

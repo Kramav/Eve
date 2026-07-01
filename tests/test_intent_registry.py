@@ -104,6 +104,45 @@ def test_learning_metadata_defaults_and_counters():
     assert learned.source == "learned" and learned.confidence == 0.42
 
 
+# ── Intent Explanation (transparency for a self-modifying router) ────────────
+
+def test_explain_reports_winner_reason_and_candidates():
+    r = IntentRegistry()
+    r.add(Intent("open_app", _openapp, [r"(?:open|launch)\s+(.+)"]))
+    r.add(Intent("open_panel", _panel, [r"open (?:the )?app manager"]))
+    e = r.explain("open app manager")
+    assert e["chosen"]["name"] == "open_panel"
+    assert "literal" in e["reason"]                              # won by specificity
+    assert [c["name"] for c in e["candidates"]] == ["open_panel", "open_app"]
+    # human phrasing mentions the winner + the shadowed candidate
+    s = r.explain_str("open app manager")
+    assert "open_panel" in s and "open_app" in s
+
+
+def test_explain_priority_reason():
+    r = IntentRegistry()
+    r.add(Intent("lo", _panel, [r"do (.+)"], priority=0))
+    r.add(Intent("hi", _openapp, [r"do the thing"], priority=100))
+    assert r.explain("do the thing")["reason"] == "highest priority"
+
+
+def test_explain_only_match_and_no_match():
+    r = IntentRegistry()
+    r.add(Intent("solo", _panel, [r"unique phrase"]))
+    assert r.explain("unique phrase")["reason"] == "only match"
+    assert r.explain("nope")["chosen"] is None
+    assert "Nothing matched" in r.explain_str("nope")
+
+
+def test_explain_carries_learning_metadata():
+    r = IntentRegistry()
+    it = Intent("learned", _panel, [r"cozy lights"], source="learned", confidence=0.6)
+    it.record_success()
+    r.add(it)
+    row = r.explain("cozy lights")["chosen"]
+    assert row["source"] == "learned" and row["confidence"] == 0.6 and row["successes"] == 1
+
+
 # ── Zero-dependency runner ────────────────────────────────────────────────────
 
 if __name__ == "__main__":

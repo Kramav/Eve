@@ -112,6 +112,44 @@ class IntentRegistry:
         groups = m.groups()
         return it, (it.handler(*groups) if groups else it.handler())
 
+    def explain(self, text: str, feature_get: Optional[Callable[[str], bool]] = None) -> dict:
+        """Intent Explanation (Dynamic Intent Learning transparency): why did /
+        would `text` route the way it does? Returns the chosen intent, WHY it won
+        (priority vs literal-match vs sole match), and every other candidate —
+        so a self-modifying router stays inspectable."""
+        hits = self.matches(text, feature_get)
+
+        def _row(it: Intent, m) -> dict:
+            return {"name": it.name, "priority": it.priority,
+                    "captured_chars": _captured_len(m), "source": it.source,
+                    "confidence": it.confidence,
+                    "successes": it.successes, "failures": it.failures}
+
+        if not hits:
+            return {"text": text, "chosen": None, "candidates": [], "reason": "no intent matched"}
+        candidates = [_row(it, m) for it, m in hits]
+        if len(hits) == 1:
+            reason = "only match"
+        elif hits[0][0].priority > hits[1][0].priority:
+            reason = "highest priority"
+        else:
+            reason = "more literal match (fewer captured chars) at equal priority"
+        return {"text": text, "chosen": candidates[0], "candidates": candidates, "reason": reason}
+
+    def explain_str(self, text: str, feature_get: Optional[Callable[[str], bool]] = None) -> str:
+        """One-line human phrasing of explain() — for a spoken 'why did you do that'."""
+        e = self.explain(text, feature_get)
+        c = e["chosen"]
+        if c is None:
+            return f"Nothing matched {text!r}."
+        s = (f"{text!r} routed to {c['name']} "
+             f"(priority {c['priority']}, {c['captured_chars']} captured chars, "
+             f"source {c['source']}) because {e['reason']}.")
+        others = [x["name"] for x in e["candidates"][1:]]
+        if others:
+            s += f" Also matched: {', '.join(others)}."
+        return s
+
 
 def from_intents(intents, feature_map=None) -> "IntentRegistry":
     """Migration bridge: build a registry from a first-match-ordered
