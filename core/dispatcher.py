@@ -30,22 +30,34 @@ _COMMANDS_FILE = Path(__file__).parent.parent / "custom_commands.json"
 _ALIASES_FILE  = Path(__file__).parent.parent / "aliases.json"
 
 
+# These two files are read on every dispatch() call; they rarely change, so we
+# cache the parsed contents and only re-read when the file's mtime changes (the
+# command editor rewrites the file on save, bumping mtime → cache invalidates).
+_JSON_CACHE: dict = {}  # path -> (mtime, parsed_list)
+
+
+def _load_json_cached(path) -> list:
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return []  # file absent → nothing to load
+    cached = _JSON_CACHE.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    try:
+        data = json.loads(path.read_text())
+    except Exception:
+        data = []
+    _JSON_CACHE[path] = (mtime, data)
+    return data
+
+
 def _load_custom() -> list:
-    if _COMMANDS_FILE.exists():
-        try:
-            return json.loads(_COMMANDS_FILE.read_text())
-        except Exception:
-            return []
-    return []
+    return _load_json_cached(_COMMANDS_FILE)
 
 
 def _load_aliases() -> list:
-    if _ALIASES_FILE.exists():
-        try:
-            return json.loads(_ALIASES_FILE.read_text())
-        except Exception:
-            return []
-    return []
+    return _load_json_cached(_ALIASES_FILE)
 
 
 # Maps alias keys (stored in aliases.json) → handler functions

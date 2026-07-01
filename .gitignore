@@ -1,3 +1,6 @@
+# Profiler output (tools/profile_baseline.py)
+profiling/
+
 # Python
 __pycache__/
 *.py[cod]

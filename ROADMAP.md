@@ -2,11 +2,52 @@
 
 Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2** (soon) → **P3** (future consideration)
 
+> **Note on tiers:** the P0/P1/P2/P3 labels below are *historical* — they were written when
+> "ship publicly" was the goal. The **current** ordering is the North Star section directly below;
+> read that first. The tier labels are kept only so old entries stay findable.
+
 ---
 
-## P0 — Public Release Blockers
+## North Star — Engine-first (current direction, 2026-07-01)
 
-> These must be resolved before Eve can be shared publicly or accept outside contributors.
+> **The goal right now is an exceptional *engine*, not a shipped product.** Build something that
+> feels incredibly fast, polished, and intuitive to use day-to-day. Distribution comes *after* the
+> engine is mature — not before. The maintainer is entering a hands-on daily-use testing period and
+> expects it to surface missing skills, UX gaps, edge cases, and perf opportunities; iterate against
+> that lived experience rather than a release checklist.
+
+**Order of priority (higher beats lower when time is scarce):**
+1. **Engine capability — UI/UX automation skills.** Expand the skill system with *broadly useful*
+   capabilities, especially controlling and interacting with arbitrary desktop application windows.
+   Push reliability until Eve can confidently operate *most* app interfaces. Prioritize skills that
+   make the assistant feel **autonomous and seamless**; avoid niche one-offs. → see **Skill Library**
+   and the **Visual Navigation** entry.
+2. **Performance & efficiency.** A leaner, faster engine beats a bigger one. If a change meaningfully
+   improves responsiveness or resource use, it outranks a new feature. → see **Performance & Efficiency**.
+3. **Architecture & maintainability.** Pay down technical debt; keep the system modular, extensible,
+   and scalable to many future skills. Favor long-term maintainability over short-term convenience.
+   → see **Architecture**.
+4. **Foundation reconsideration (Electron → ?).** Open to replacing Electron *if* it's a clear
+   long-term win (startup, memory, responsiveness, UI/animation smoothness, maintainability) — but
+   **only after** a written tradeoff/effort/risk/migration analysis is reviewed. No rewrite for its own
+   sake. → see **Foundation — desktop shell**.
+
+**Design principles for every decision:** speed · responsiveness · smooth UX · elegant UI · low
+resource use · clean architecture · maintainability · extensibility. **Every new feature must justify
+its cost in complexity and performance** — prefer a fast, polished, intuitive engine over a
+feature-packed one that's slower or harder to maintain. Avoid complexity and feature bloat.
+
+**Explicitly deprioritized:** installers, packaging, release automation, public docs, deployment,
+distribution (former P0 #5). Do not spend time here until the engine feels production-ready. See the
+parked note under P0 #5.
+
+---
+
+## P0 — (historical) Release Blockers
+
+> Written when public release was the goal. **Public release is now deferred** (see North Star).
+> Items here that also improve the *engine* (tests, dead-code removal, hardcode cleanup) still count;
+> the *distribution* item (#5) is parked.
 
 ### 1. Platform scope decision — *DECIDED: own Windows*
 **Decision (2026-06-24): Eve is a Windows-first voice assistant — "the best voice assistant for Windows."** Rationale: the entire value layer is already Win32-native and hard to abstract without gutting it — DPI-aware tiling, `raise_to_top_no_focus`/foreground-lock z-order tricks, `EnumWindows` identification, the HKCU autostart key, WinRT toasts, `.lnk` app scanning, Discord global-keybind injection, borderless-fullscreen game detection. Cross-platform would mean reimplementing all of it per-OS (or dropping it), turning Eve's differentiator into its weakest feature. Going deep on Windows is the higher-leverage bet.
@@ -18,7 +59,7 @@ Priority tiers: **P0** (public release blockers) → **P1** (next up) → **P2**
 - `setup.py` already checks for Windows-only deps; no change needed.
 
 ### 2. Test suite — *expanded*
-`tests/test_dispatch.py` covers INTENTS routing (protected-programs, workspace presets, monitor naming, per-zone HUD targeting, auto-snap, consolidated panel routing), BROWSING mode, feature-gating, mishear subs, **skill loading + integration**, and an `INTENTS`-compile/handler guard. **Execution tests added:** `tests/test_timeparse.py` (12 deterministic cases for relative/absolute/recurring/split parsing via injected `now` — no mocks); Discord focus-deferral (`test_discord_navigation_defers_when_protected` / `…_proceeds_when_unprotected`, light monkeypatch of `essential.active` + `_discord_hwnd`). Tiling is covered by routing tests + the `_best_open_window` self-check (`python commands/tiling.py`). Both files run under `pytest tests/` or standalone. **Remaining:** reminders *scheduler* re-arm logic (recurring re-fire) still untested — needs a fake clock around `commands.reminders` checker.
+`tests/test_dispatch.py` covers INTENTS routing (protected-programs, workspace presets, monitor naming, per-zone HUD targeting, auto-snap, consolidated panel routing), BROWSING mode, feature-gating, mishear subs, **skill loading + integration**, and an `INTENTS`-compile/handler guard. **Execution tests added:** `tests/test_timeparse.py` (12 deterministic cases for relative/absolute/recurring/split parsing via injected `now` — no mocks); Discord focus-deferral (`test_discord_navigation_defers_when_protected` / `…_proceeds_when_unprotected`, light monkeypatch of `essential.active` + `_discord_hwnd`). Tiling is covered by routing tests + the `_best_open_window` self-check (`python commands/tiling.py`). Both files run under `pytest tests/` or standalone. **Reminders scheduler now covered:** [tests/test_reminders.py](tests/test_reminders.py) (7 cases — recurring re-arm / recurring re-fire / weekly roll-a-week via injected clock) closes the former gap. **Suite status (2026-07-01): fully green** — `tests/test_dispatch.py` 34/34, `tests/test_visual_nav.py` 13/13, plus registry/vision/verify/timeparse/reminders all passing.
 
 ### 3. Plugin/skill system — *DONE*
 ~~Adding a new command required editing `core/dispatcher.py`.~~ **Done:** [core/skills.py](core/skills.py) imports every `skills/*.py` at startup (`skills.load(display)` from main.py) and collects each file's module-level `INTENTS` list (same `(regex, handler)` shape as built-ins). Optional `PRIORITY` (ordering among skills), `FEATURE` (gate on features.json), and `setup(display)` hook. Skill intents are tried in `dispatch()` after built-ins and before the fuzzy/LLM fallback, so they extend without overriding. Import/handler errors are caught + logged so one bad skill can't crash Eve. Ships with [skills/example_dice.py](skills/example_dice.py) (roll/flip) + [skills/README.md](skills/README.md). Tests: `test_skill_loading`, `test_skill_integration_through_dispatch`. This also supersedes P3 "Skill entry points" (file-drop is simpler than pyproject entry points for this use case).
@@ -34,8 +75,12 @@ Recent features (focus-essential, workspace presets, monitor naming, Ollama fall
 ### 4. Remove hardcoded assumptions — *mostly done*
 **Done:** WS port/host centralized to `config.WS_PORT`/`WS_HOST` (display.py imports them; env-overridable via `EVE_WS_PORT`/`EVE_WS_HOST`). Wake word already lived in `config.WAKE_WORD`; the dispatcher's hardcoded spoken-prefix tuple is now `config.WAKE_PREFIXES` (`EVE_WAKE_PREFIXES`). Screenshot dir → `config.SCREENSHOT_DIR` (`EVE_SCREENSHOT_DIR`). **Remaining/deferred:** the Electron renderer files still hardcode `ws://127.0.0.1:7734` in their CSP `connect-src` + `WS_URL` (8 files) — a build-time inject is only worth it if a configurable port is ever actually needed (ponytail). Data-file paths (`apps.json`, `settings.json`, `tiling_layouts.json`, `eve_memory.json`) are repo-relative and deterministic, not user-facing settings — intentionally left as-is.
 
-### 5. Distribution — *script ready, build step pending*
-**Done:** [installer/eve.iss](installer/eve.iss) — an Inno Setup 6 script that wraps a pre-built `dist\Eve\` folder into `Eve-Setup-<ver>.exe` with Start Menu shortcut, optional desktop icon, optional run-at-login (writes the same HKCU Run key as `core/autostart.py`, removed on uninstall), and an uninstaller. Per-user install (no admin prompt). [installer/README.md](installer/README.md) documents the two-stage build (Electron UI → PyInstaller onedir freeze of `main.py` with the right `--add-data`/`--collect-all` flags) and a winget follow-up. **Remaining:** actually run the build toolchain (PyInstaller + npm) to produce `dist\Eve\` and `iscc` it — needs a Windows box with the toolchain; expect to iterate the PyInstaller hidden-imports for openwakeword/piper/sounddevice the first time.
+### 5. Distribution — *PARKED (deprioritized 2026-07-01)*
+> **Do not work on this until the engine is mature.** Public release is deferred; installers,
+> packaging, release automation, deployment, and public docs are explicitly off the table for now
+> (see North Star). The script below already exists, so there is nothing to *do* here — it waits.
+
+**Done (kept for whenever release becomes a goal):** [installer/eve.iss](installer/eve.iss) — an Inno Setup 6 script that wraps a pre-built `dist\Eve\` folder into `Eve-Setup-<ver>.exe` with Start Menu shortcut, optional desktop icon, optional run-at-login (writes the same HKCU Run key as `core/autostart.py`, removed on uninstall), and an uninstaller. Per-user install (no admin prompt). [installer/README.md](installer/README.md) documents the two-stage build (Electron UI → PyInstaller onedir freeze of `main.py`). **When resumed:** run the build toolchain (PyInstaller + npm) to produce `dist\Eve\` and `iscc` it; expect to iterate the PyInstaller hidden-imports for openwakeword/piper/sounddevice the first time.
 
 ---
 
@@ -48,6 +93,13 @@ Recent features (focus-essential, workspace presets, monitor naming, Ollama fall
   + download the model files, then pick a voice. No code left.
 
 ### Visual Navigation skill — *Phase 1 done; Phase 2 mostly done (2d ONNX detector pending)*
+> **★ Headline priority (North Star #1).** This is the skill that makes Eve feel autonomous — driving
+> arbitrary app UIs by voice. The next work here is **reliability across real apps**, not new backends:
+> daily-drive it, log where element detection misses (which apps/controls the UIA tree or OCR fails to
+> surface), and close those gaps. Treat the "known minor gap" and detection misses as the priority
+> queue. A bigger set-of-marks font and drag-by-description are quick UX wins; the ONNX detector is only
+> worth it if UIA+OCR leave a real coverage hole after daily use proves it.
+
 Hands-free mouse control was refactored out of core into an optional, feature-gated drop-in skill
 ([skills/visual_nav.py](skills/visual_nav.py), `visual_nav` flag, default off, Alpha group). It grew
 from "nudge the mouse" into voice-driven element navigation: enumerate the interactive elements of
@@ -110,6 +162,121 @@ hands free mode" routes to app-launch (skill intents run after `apps.open_app`);
 (accessibility tier) and optionally `pip install rapidocr-onnxruntime` (OCR vision tier, no GPU); enable
 "Hands-free Visual Navigation" in the App Manager. Cloud vision: add an Anthropic/OpenAI key in the
 API-Keys panel and set `EVE_VISION_BACKENDS=rapidocr,claude` (or `gpt`/`ollama`).
+
+---
+
+## Performance & Efficiency (North Star #2)
+
+> **Goal: the engine should *feel* instant and sip resources.** A meaningful responsiveness or
+> resource win outranks a new feature. This section is an **audit backlog**, not a list of confirmed
+> bugs — every candidate below must be *measured before it's touched*. Encode findings as tests where
+> possible (per the "verify via tests" rule) and record before/after numbers.
+
+**Method:** [tools/profile_baseline.py](tools/profile_baseline.py) is the profiling harness (zero deps —
+stdlib + PowerShell). *Part A* (headless micro-benchmarks — routing, catalog build, feature-snapshot
+cost) runs any time with no side effects; *Part B* (idle CPU%/RSS/threads per Eve process) runs while
+Eve is up and idle. Both write a timestamped report to `profiling/`. Run Part B **before** optimizing so
+fixes 1/4/6 below can be ranked by real cost. Optimize against numbers, not intuition. **Guardrail:**
+never trade capability or determinism for speed without saying so explicitly. *(Part A already run
+2026-07-01: routing 0.057ms/phrase, feature-snapshot 0.007ms — confirms the understanding path is not a
+bottleneck; the wins are in the UI render loop + polling, below.)*
+
+**Static audit findings (2026-07-01) — ranked by expected idle-cost impact. Confirm magnitudes with the
+profiler; the *diagnosis* is code-confirmed at the cited lines.**
+
+1. **★ DONE — Orb canvas rendered at ~60fps forever, even at idle.** `drawOrb` in
+   [ui/src/app.js](ui/src/app.js) used multiple `shadowBlur` passes + radial gradients every frame and
+   re-scheduled itself unconditionally, so the orb burned CPU/GPU at 60fps while Eve did nothing.
+   **Fixed:** the rAF self-schedule was pulled out into a `frame(ts)` pump that keeps full frame rate
+   for active states (listening/processing/playing/always-on) but throttles to ~18fps (`IDLE_FRAME_MS`)
+   when idle — the idle orb only slow-pulses, which 18fps renders fine. Expected the biggest idle-CPU
+   drop; confirm magnitude with the profiler (Part B before/after).
+2. **★ DONE — Hot-reload polled the filesystem every 1s in production.**
+   [core/hot_reload.py](core/hot_reload.py) `while True: time.sleep(1)` stat'd 5 module files every
+   second, forever — a dev-only convenience with zero user value and the most frequent Python poll.
+   **Fixed:** `start()` is now a no-op unless `EVE_DEV=1` / `EVE_HOT_RELOAD=1` is set, so the poll is
+   gone in normal use. Verified off-by-default / on-with-flag.
+3. **DONE — Per-command disk I/O on the dispatch hot path.**
+   [core/dispatcher.py](core/dispatcher.py) `_load_custom()` / `_load_aliases()` re-read **and**
+   re-parsed `custom_commands.json` + `aliases.json` from disk on **every** `dispatch()` call.
+   **Fixed:** `_load_json_cached()` caches the parsed list keyed on the file's mtime (the command editor
+   bumps mtime on save → cache invalidates), so a steady-state command does a single `stat` instead of
+   read+parse×2. Verified cache-hit on present files; absent files stay a cheap `stat`. *(Routing itself
+   was already 0.057ms/phrase, so this I/O — not matching — was the per-command cost.)*
+4. **HUD broadcast fan-out: ~6–8 full-state serializations per command** —
+   [core/display.py](core/display.py) `_broadcast()` ([:285](core/display.py#L285)) rebuilds a full
+   `_snapshot()` (state + features + status + labels + alpha + reasons) and pushes it to *every*
+   connected client on each of `show`/`update`/`set_mode`/`log`/`hide_list` — a single `on_command`
+   fires this many times. Every open panel receives every `state` message even though most filter it
+   out. Snapshot build itself is cheap (measured 0.007ms), so this is about **message volume/chatter**,
+   not CPU — lower priority than 1–3, but worth coalescing (batch rapid updates in a command, or only
+   send `state` to the orb/directory that consume it). Note: `_compute_status()` (the expensive
+   import-probe) correctly runs only at startup / `refresh_status()`, *not* per broadcast — good.
+5. **Orb topmost re-assert every 2s** — [ui/main.js:163-167](ui/main.js#L163-L167). Low absolute cost
+   (one `setAlwaysOnTop` call/2s). Candidate for event-driven replacement via a foreground-change hook,
+   but minor. **Roadmap correction:** only the *orb* re-asserts; the directory window is intentionally
+   *not* always-on-top ([ui/main.js:179-181](ui/main.js#L179)), so the earlier "orb *and* directory"
+   note was wrong.
+6. **Directory clock ticks every 1s on a hidden window** —
+   [ui/src/directory/app.js:57-62](ui/src/directory/app.js#L57-L62). The directory is pre-warmed and
+   hidden (not destroyed), so its clock `setTimeout` keeps updating DOM every second even while hidden.
+   Tiny, but a clean "pause work when not visible" fix (gate on `document.visibilityState`).
+7. **Reminder scheduler re-reads its JSON file every 15s** —
+   [commands/reminders.py:352-386](commands/reminders.py#L352-L386). Light (15s interval, `on_change`
+   only fires on real change — good), but it does disk read + parse each tick even with zero reminders.
+   Low priority; could compute sleep-until-next-due and re-read only on change.
+
+**Confirmed NON-issues (checked, leave alone):** routing/registry matching is microseconds
+([profiler](tools/profile_baseline.py) Part A); heavy optional deps (`uiautomation`, `rapidocr`,
+`onnxruntime`, `paho-mqtt`, `kokoro`) are all lazy-imported inside functions, not at startup; the LLM
+fallback is genuinely last-resort in `dispatch()` (never speculative); panels are *destroyed* on close
+(`'closed' → null`), so only orb+directory hold renderer memory persistently; `features._compute_status`
+(import probing) runs only at startup/on-demand, not per broadcast. The Programs panel's 3s poll
+([ui/src/programs/app.js:27](ui/src/programs/app.js#L27)) only runs while that panel is open (destroyed
+on close), so it's acceptable.
+
+**Still to measure (needs the live profiler — Part B — while Eve runs idle):** actual idle CPU% and RSS
+per process (to *rank* fixes 1/4/6 by real cost), total thread count, and Electron renderer RSS per panel
+(feeds the Foundation question).
+
+**Simplify execution paths (without losing capability):** the dispatcher is now registry-driven; continue
+flattening intent priorities cluster-by-cluster (see Architecture → Tier A "Remaining") so literal-match
+specificity carries routing and the order-dependent set shrinks. Fewer hand-tuned priorities = fewer
+places to reason about latency and correctness.
+
+---
+
+## Foundation — desktop shell (North Star #4)
+
+> **Open to replacing Electron, but not before a written analysis is reviewed.** No rewrite for its own
+> sake. This entry is the *placeholder for that analysis*, not a decision.
+
+**When to seriously evaluate:** after the performance audit above produces real numbers. If Electron
+renderer memory / startup / animation smoothness turn out to be a material drag on the "feels instant"
+goal, that's the trigger. If they don't, this stays parked.
+
+**What a proposal must contain before any migration work begins** (per maintainer's instruction —
+present tradeoffs, effort, risks, and strategy *first*):
+- **Candidates & tradeoffs.** Tauri (Rust core + system WebView — big memory/startup win, but the UI is
+  still web tech so panels port with moderate effort; Rust learning curve, smaller ecosystem, per-OS
+  WebView quirks). Native (WinUI 3 / Win32 + Direct2D — best smoothness/footprint, but a *full* UI
+  rewrite and loses the web-panel authoring speed). Others (Flutter desktop, Avalonia) noted for
+  completeness. Weigh each against: startup, idle RSS, responsiveness, animation, and — heavily —
+  **maintainability + how easily new skill-owned panels are added**.
+- **Effort & blast radius.** Eve's Python core (`main.py`, dispatch, Win32 funnels, WS bridge) is
+  **shell-agnostic** — the migration surface is the `ui/` layer (~15 panels + orb + overlays + `main.js`
+  window factory + the WS/IPC contract). Estimate panel-by-panel; the WS protocol is the natural seam
+  (a new shell speaks the same WS messages, so Python barely changes). Tauri reuses the existing
+  HTML/CSS/JS panels (lower effort); native does not (highest effort).
+- **Risks.** Losing the hard-won Win32 z-order tricks (topmost-above-fullscreen for orb/directory,
+  `showInactive`, transparent NC-area border fix, per-monitor DPI `dipToScreenRect`) — these are
+  Electron-`BrowserWindow`-specific and must be re-proven on any new shell *before* committing.
+- **Strategy.** If it goes ahead: keep the WS contract fixed, port one non-critical panel first as a
+  spike to validate z-order + transparency + DPI on the new shell, measure it against Electron, and only
+  then commit to porting the rest. Never a big-bang rewrite.
+
+**Recommendation until then:** *don't migrate yet.* Get the numbers first; Tauri is the most likely
+target if the numbers justify a move (it preserves the web-panel investment), but the audit decides.
 
 ---
 
@@ -352,6 +519,14 @@ clean drop-ins. Until then they stay core by design.
 ---
 
 ## Skill Library — candidate drop-in skills
+
+> **North Star #1 emphasis (2026-07-01):** the top skill priority is **operating arbitrary desktop
+> application UIs reliably** — making Eve feel autonomous and seamless, not accumulating niche skills.
+> That means the **Visual Navigation** entry (P1) and the Tier-A **Window quick-actions** below are the
+> headline work: push accessibility/vision element-detection reliability until Eve can confidently drive
+> *most* app interfaces by voice ("what can I click" → act on it) across the apps used daily. New skills
+> should be **broadly useful** and justify their complexity/perf cost (see North Star). Tiers below stay
+> as-is for reference, but weight selection toward things that make Eve more autonomous over one-off toys.
 
 Day-to-day skills worth shipping. **Every item below is implementable as a
 `skills/*.py` drop-in** (module-level `INTENTS`, optional `PRIORITY`/`FEATURE`/

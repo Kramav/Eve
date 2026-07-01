@@ -4,6 +4,14 @@ import sys
 import threading
 import time
 
+# Auto-reload is a *developer* convenience (re-import command modules when their
+# source changes on disk). It costs a 1-second filesystem poll for the life of
+# the process, which is pure waste for someone just *using* Eve and never editing
+# source. So it's opt-in: set EVE_DEV=1 (or EVE_HOT_RELOAD=1) to enable it.
+def _dev_enabled() -> bool:
+    return bool(os.environ.get("EVE_DEV") or os.environ.get("EVE_HOT_RELOAD"))
+
+
 # Reload command modules first (dispatcher imports them), then dispatcher itself.
 # Skills (skills/*.py, incl. youtube) aren't hot-reloaded — they're loaded once
 # at startup and hold live state (mpv process, Display handle) reload would wipe.
@@ -46,7 +54,13 @@ def _reload_all() -> None:
 
 
 def start() -> None:
-    """Start the background file watcher. Call once at startup."""
+    """Start the background source-file watcher. Call once at startup.
+
+    No-op unless EVE_DEV / EVE_HOT_RELOAD is set — see module docstring. This
+    keeps the always-on 1s poll out of normal use."""
+    if not _dev_enabled():
+        return
+    print("Hot-reload: watching command modules (EVE_DEV)")
     mtimes = {name: _mtime(name) for name in _ALL}
 
     def _watch():

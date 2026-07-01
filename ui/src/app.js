@@ -161,8 +161,6 @@ function drawOrb(ts) {
     ctx.strokeStyle = orbColor(sa * 0.8); ctx.lineWidth = 0.8
     ctx.beginPath(); ctx.moveTo(CX - 32, sy); ctx.lineTo(CX + 32, sy); ctx.stroke()
   }
-
-  requestAnimationFrame(drawOrb)
 }
 
 function _ring(r, s, e, color, lw, glow) {
@@ -187,7 +185,22 @@ function _roundRect(x, y, w, h, r) {
   ctx.closePath()
 }
 
-requestAnimationFrame(drawOrb)
+// Frame pump. The orb's canvas work (shadowBlur passes + radial gradients) is
+// the biggest idle cost, and at idle the orb only slow-pulses — it does not need
+// 60fps. So when idle we throttle to ~18fps; active states (listening/processing/
+// playing, or always-on) keep the full frame rate for smoothness.
+const IDLE_FRAME_MS = 55  // ~18fps
+let _lastDraw = 0
+function frame(ts) {
+  const isActive = evEnabled &&
+    (evMode === 'listening' || evMode === 'processing' || evMode === 'playing' || evAlwaysOn)
+  if (isActive || ts - _lastDraw >= IDLE_FRAME_MS) {
+    _lastDraw = ts
+    drawOrb(ts)
+  }
+  requestAnimationFrame(frame)
+}
+requestAnimationFrame(frame)
 
 // ── Apply state ───────────────────────────────────────────────────────────────
 function applyState(s) {

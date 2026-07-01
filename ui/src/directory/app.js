@@ -55,9 +55,13 @@ function setConnected(ok) {
 
 // ── Clock ────────────────────────────────────────────────────────────────────
 ;(function tick() {
-  const n = new Date(), p = v => String(v).padStart(2, '0')
-  const el = document.getElementById('clock')
-  if (el) el.textContent = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`
+  // The directory is pre-warmed and hidden (not destroyed), so skip the DOM
+  // write while it's not visible — no point re-rendering a clock nobody sees.
+  if (document.visibilityState !== 'hidden') {
+    const n = new Date(), p = v => String(v).padStart(2, '0')
+    const el = document.getElementById('clock')
+    if (el) el.textContent = `${p(n.getHours())}:${p(n.getMinutes())}:${p(n.getSeconds())}`
+  }
   setTimeout(tick, 1000)
 })()
 
