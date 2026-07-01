@@ -318,6 +318,41 @@ def test_skill_integration_through_dispatch():
     assert "rolled" in str(d.dispatch("roll 2d6")).lower()
 
 
+def test_skill_preempt_partition():
+    # PREEMPT skills register in the pre-built-in bucket; normal skills don't.
+    from core import skills
+    skills.load(display=None)
+    assert any(rx.search("open youtube") for _p, rx, _h, _f in skills._preloaded), \
+        "youtube entry intents must be in the PREEMPT bucket"
+    assert any(h.__name__ in ("_roll", "_flip") for _p, _rx, h, _f in skills._loaded), \
+        "example_dice must be a normal (non-preempt) skill"
+
+
+def test_preempt_skill_beats_builtin_through_dispatch():
+    # With YouTube enabled, "browse youtube" must be claimed by the PREEMPT skill
+    # (safe: no Display wired -> overlay-not-running message) ahead of the app
+    # launcher / web-search built-ins. Proves PREEMPT runs before the table.
+    from core import skills, features, session as Sess
+    skills.load(display=None)
+    prev_state, prev_status = features._state.get("youtube"), features._status.get("youtube")
+    features._state["youtube"], features._status["youtube"] = True, "ok"
+    Sess.reset()
+    try:
+        resp = str(d.dispatch("browse youtube")).lower()
+        assert "overlay" in resp or "browsing" in resp, resp
+    finally:
+        _restore(features._state, "youtube", prev_state)
+        _restore(features._status, "youtube", prev_status)
+        Sess.reset()
+
+
+def _restore(d_, key, prev):
+    if prev is None:
+        d_.pop(key, None)
+    else:
+        d_[key] = prev
+
+
 # ── 3D printer skill ──────────────────────────────────────────────────────────
 # Filename starts with a digit, so it can't be `import`ed normally; load it from
 # its path the same way core.skills does. No network is touched: routing is

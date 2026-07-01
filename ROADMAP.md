@@ -167,6 +167,73 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 
 ---
 
+## Architecture — core vs. skill (where to draw the line)
+
+The repeated refactors this cycle (YouTube → skill, hands-free → `visual_nav`
+skill) converged on a rule worth stating outright:
+
+> **Core is the engine and the OS-integration primitives. A skill is a feature
+> built on top of them. If something *can* be a skill, it should not be woven
+> into core.**
+
+**Core = the kernel everything else stands on.** A capability belongs in core
+only if it meets one of:
+1. **It's the always-on assistant loop** — wake-word listener, STT
+   (`transcriber`), the dispatch pipeline (`dispatcher`), session/converse state
+   (`session`), TTS (`speaker`), the Display/overlay + WS bridge, feature flags
+   (`features`), and the skill loader itself.
+2. **It's an OS-integration primitive reused by many features** — the `core/`
+   Win32 funnels: `window_ops`, `key_ops`, `monitor`, `notify`, `autostart`. Per
+   the P0 platform decision, new Win32 lives here so skills call helpers, not raw
+   `ctypes`.
+3. **It defines the UX contract** — the response types
+   (`Silent`/`Panel`/`VideoList`/`SiteList`/`Verified`), the HUD/orb, the
+   directory panels.
+
+**Skill = a self-contained capability** that maps phrases → actions, that not
+every user needs, that toggles off via a `FEATURE` flag, and that integrates with
+exactly one thing (an app, a device, a service, a domain). YouTube, the 3D
+printer, smart lights, weather, media control — all skills. The test: *if I
+deleted this file, would the rest of Eve still make sense?* If yes, it's a skill.
+
+**Litmus questions for a new capability:**
+- Do other features depend on it as infrastructure? → core.
+- Is it part of the irreducible "listen → understand → act → respond" loop? → core.
+- Is it one domain/integration a user might never touch? → skill.
+- Could a contributor ship it as a single dropped-in file? → skill.
+
+**Grey areas (currently core, but skill *candidates* for extraction):**
+- **Web search** (`commands/search.py`) — self-contained (DDG/Brave + clickable
+  results + site-list converse); it's core only because it predates the loader.
+  The site-list converse moves with it (web search is its sole user now that
+  YouTube left).
+- **Discord** (`commands/discord.py`) — very self-contained (keybind injection,
+  nav, messaging). Prime extraction candidate.
+- **Memory store** (`remember`/`forget`/recall) — the *store* is a skill
+  candidate; the **pronoun follow-ups** (`go back`/`cancel it`, on
+  `session.last_action`) are cross-cutting and stay core.
+- **Tiling voice grammar** — the snap/enumerate *primitives* are core and heavily
+  reused (auto-snap on launch, workspaces, HUD positioning); the *voice grammar*
+  over them could be a skill layer. Lower priority — tiling is the headline
+  Windows differentiator.
+
+**What keeps a feature in core today — skill-API gaps to close first.** These are
+*intentionally* core until the skill contract grows, not neglect:
+- **Background services** — reminders/timers run a long-lived scheduler thread.
+  Needs a `register_service()` skill hook (+ an `on_change` UI hook) before it can
+  be a drop-in.
+- **Pre-dispatch text shaping** — mishear substitutions and the fuzzy catalog live
+  in core; a skill can't contribute either yet. Needs skills to export optional
+  `MISHEARS` / `CATALOG` entries the loader merges.
+- **New HUD panels** — a skill can drive *existing* panels via the Display and
+  return existing response types, but a genuinely new panel still needs `ui/` +
+  `display` work. Needs a generic skill-owned list/detail panel.
+
+Closing those three gaps is what lets reminders (then web search, Discord) become
+clean drop-ins. Until then they stay core by design.
+
+---
+
 ## Skill Library — candidate drop-in skills
 
 Day-to-day skills worth shipping. **Every item below is implementable as a
@@ -266,10 +333,48 @@ verification confirms they actually took. Tiered by daily value × low friction.
   (the latter via the Ollama fallback that already exists).
 - **Jokes / quote of the day** — local list or a no-key API; pure delight.
 
-> Suggested first batch (max value, zero/near-zero friction): **media & volume**,
-> **weather**, **system power/lock**, **calculator/convert**. Each is a standalone
-> drop-in and a good template to seed outside contributors. A "recommended skills"
-> index in [skills/README.md](skills/README.md) would help that along.
+### Tier F — UI/UX & the Eve interface (make Eve itself nicer to use)
+These improve the moment-to-moment experience of *using Eve* — its overlay,
+feedback, and discoverability — not just external tasks. They drive the existing
+Display/HUD via skill `setup(display)`, so they stay skills (no new core panels
+needed beyond what already exists; a genuinely new panel is a core gap — see the
+Architecture section).
+- **Media & volume + now-playing HUD** ⭐ — the recommended **first** skill.
+  Controls ("pause" / "next" / "volume to 30" / "mute" via media keys +
+  `IAudioEndpointVolume`), *plus* surface the current track (title/artist) in the
+  routing directory and a small now-playing badge on the orb, click-to-pause.
+  Makes the most-used daily action visible. Bare "mute" already maps to system
+  mute — extend, don't clash. Returns `Verified` (re-read volume/transport state).
+- **Appearance & orb control** — "dark mode" / "accent color blue" / "make the orb
+  bigger" / "move the orb to the top-right" / "more transparent". Voice theming of
+  Eve's own UI (writes `settings.json` `ui_scale`/theme, drives the overlay).
+  Generalizes the orb-move that already lives in the Window Manager.
+- **Live captions / "show me what you heard"** — a translucent strip showing the
+  last recognized utterance + Eve's reply. Accessibility + trust (you see exactly
+  what STT heard). Drives a small overlay.
+- **"Repeat that" / "louder" / "read it again"** — replay the last spoken response,
+  bump TTS volume, or re-show the last result list. Tiny, high-frequency win on the
+  last response / `session.last_action`.
+- **Do Not Disturb (Eve)** — "be quiet" / "stop listening for a bit" / "wake me in
+  20" — mute Eve's TTS + dim the orb without fully disabling the listener. Distinct
+  from system Focus Assist.
+- **Interactive tour** — "what can you do" / "show me around" — a guided walkthrough
+  that opens each panel and demos one command. Onboarding for new users +
+  contributors.
+- **Activity recap** — "what did I miss" / "read the last few things" — read back
+  the directory's recent activity feed aloud; turns the existing log into a voice
+  surface.
+- **Clipboard history panel** — a HUD list of recent clipboard entries, click to
+  re-copy (mirrors the Memory/Reminders panels). Pairs with the Tier-A "read
+  clipboard."
+
+> **Recommended first build: the Media & volume + now-playing skill** (Tier A
+> controls + the Tier F HUD surface) — highest daily use, no new deps, and it
+> exercises both the action path (`Verified`) and the Display path, making it the
+> ideal template for contributors. After it: **weather**, **system power/lock**,
+> **calculator/convert** (the rest of the zero-friction first batch). A
+> "recommended skills" index in [skills/README.md](skills/README.md) would help
+> seed outside contributors.
 
 ---
 

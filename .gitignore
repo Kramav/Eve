@@ -43,3 +43,6 @@ desktop.ini
 .idea/
 *.suo
 *.user
+
+# Claude Code personal settings
+.claude/settings.local.json
