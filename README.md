@@ -299,6 +299,12 @@ Zones are defined in `tiling_layouts.json` and configured via the Window Manager
 | `go to github.com` | Open a URL directly |
 | `open the first one` / `go to 2` | Navigate to a search result |
 | `open the wikipedia one` | Navigate by keyword |
+| `use chrome as my browser` | Choose which browser opens links |
+
+Web pages open in your **chosen browser** (`use chrome as my browser` / `set my browser to firefox`;
+Firefox by default, falls back to your OS default). Crucially, they're surfaced *beside* your task
+without stealing focus — and if a game owns the screen, the page waits in the background (or lands on
+your [second monitor](#multiple-monitors-strongly-recommended)) rather than yanking you out.
 
 ### System
 

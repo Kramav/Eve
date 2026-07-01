@@ -86,9 +86,14 @@ primitive.
    focus off a game — it appears beside the task. `toggleDirectory()` switched from an `isFocused()`
    check to a plain visibility toggle (it no longer holds focus). Clicking a row/button still focuses the
    window on demand, so interaction is unaffected.
-3. **Fresh-browser-launch focus race — [commands/search.py:214-222](commands/search.py#L214-L222).** When
-   Firefox isn't already running, it can self-activate before `raise_to_top_no_focus` runs. Fold into the
-   #1 fix (capture + restore prior foreground when protected). P1.
+3. **★ DONE — Fresh-browser-launch focus race + browser-open focus-steal.** Generalized the old
+   Firefox-only `_firefox_search` into a **core primitive** [core/browser.py](core/browser.py): resolves
+   the user's *chosen* browser (settings.json `browser`: firefox/chrome/edge/brave/default/path), launches
+   it `SW_SHOWNOACTIVATE`, and raises it via `raise_to_top_no_focus` — **unless** a game owns the screen
+   (`fullscreen_app_running()` → leave it backgrounded). All four browser-open paths in
+   [commands/search.py](commands/search.py) (`web_search`, `go_to_site`, `select_site`, in-app-off search)
+   now route through it — previously three used bare `webbrowser.open`, which **steals focus**. Voice:
+   "use chrome as my browser". Tests: [tests/test_browser.py](tests/test_browser.py).
 4. **Managed config panels — [ui/main.js](ui/main.js)** (app-manager/window-manager/voice-settings/
    command-editor/programs/memory/reminders/integrations) use `.show()`/`.focus()`. **Gray, not a clear
    violation:** opening an interactive *form* by voice implies intent to interact, so focus is defensible.
@@ -99,11 +104,11 @@ primitive.
 `showInactive`" — inaccurate. Only the YouTube overlay does; the directory and all managed panels use
 `show()`/`focus()`. (This audit supersedes that note.)
 
-**Order:** #1 (app-launch) and #2 (HUD open) — the two that broke the promise in the flagship scenario —
-are **DONE**. Remaining: #3 (fresh-browser launch race) folds into the "chosen-browser
-surface-without-focus" core primitive for search; #4 (config panels) is gray, revisit only if daily use
-shows it's disruptive. **Verify #1/#2 live during daily-driving:** launch an app and open the HUD by
-voice while a fullscreen game is focused — the game should keep focus in both cases.
+**Order:** #1 (app-launch), #2 (HUD open), and #3 (browser opens, via the chosen-browser primitive) are
+all **DONE** — the whole flagship path (launch, HUD, search-over-a-game) now honors the invariant. Only
+#4 (config panels) remains, and it's gray — revisit only if daily use shows it's disruptive. **Verify
+live during daily-driving:** with a fullscreen game focused, launch an app, open the HUD, and run a web
+search by voice — the game should keep focus in all three.
 
 ---
 
@@ -152,7 +157,8 @@ next. Links point to the detail.
 | **1 · Capability** | Window quick-actions skill | ✅ shipped ([skills/window_actions.py](skills/window_actions.py)) |
 | **1 · Capability** | More UI/UX automation skills; harden Visual Navigation via daily use | ⏳ next → [Skill Library](#skill-library--candidate-drop-in-skills), [Visual Navigation](#visual-navigation-skill--phase-1-done-phase-2-mostly-done-2d-onnx-detector-pending) |
 | **1 · Flagship promise** | Focus invariant: app-launch + HUD-open focus-steal | ✅ fixed → *Reference · Focus-policy audit* |
-| **1 · Flagship promise** | Focus invariant: browser-launch race, config panels | ⏳ remaining → *Reference · Focus-policy audit* |
+| **1 · Flagship promise** | Focus invariant: browser opens (chosen-browser primitive) | ✅ done → *Reference · Focus-policy audit #3* |
+| **1 · Flagship promise** | Focus invariant: config-panel opens (gray area) | ⏳ revisit only if disruptive |
 | **1 · Flagship promise** | Multi-monitor: opened windows avoid the game's screen | ✅ shipped → Completed |
 | **1 · Flagship promise** | Designatable "Eve monitor" for 3+ monitor setups + startup prompt | ✅ shipped (Python-only) → Completed |
 | **2 · Performance** | Perf pass #1 (orb throttle, hot-reload gate, dispatch cache, hidden clock) | ✅ done → [Performance](#performance--efficiency-north-star-2) |
@@ -857,6 +863,7 @@ Architecture section).
 
 | Feature | Notes |
 |---------|-------|
+| Chosen-browser primitive (focus-safe URL opening) | [core/browser.py](core/browser.py): resolve the user's browser (settings.json `browser`: firefox/chrome/edge/brave/default/path) → launch `SW_SHOWNOACTIVATE` → `raise_to_top_no_focus`, but leave it backgrounded if a game owns the screen. Realizes the "chosen browser" gap + the flagship "search over a game without focus loss". All four browser-open paths in [commands/search.py](commands/search.py) refactored onto it (3 previously used focus-stealing `webbrowser.open`); Firefox-specific `_firefox_search` deleted. Voice: "use chrome as my browser" / "set my browser to firefox" (`search.set_web_browser`). Resolves focus-audit violation #3. Tests: [tests/test_browser.py](tests/test_browser.py) (resolution, default/not-found, validation, voice parse) |
 | Designatable "Eve monitor" (3+ monitors) | For 3+ monitor setups where "the non-game screen" is ambiguous, the user picks which monitor Eve puts opened windows on: "set monitor 2 as Eve's monitor" / "use my right screen for Eve" / "make this Eve's monitor" → `window_manager.set_eve_monitor` → `monitor.set_eve_monitor` writes `companionMonitorRect` to settings.json. `_select_target_monitor` prefers it, but falls back if the game is running on it. On 3+ monitors with nothing designated, a startup prompt (HUD + toast) nudges the user to pick one. **Implemented entirely in Python** (no Electron round-trip — `enumerate_work_areas` gives physical rects) to keep it off the migration surface. Tests: [tests/test_monitor_target.py](tests/test_monitor_target.py) (index/positional/primary resolution, describe, prompt firing) |
 | Multi-monitor: opened windows avoid the game's screen | Strongly-recommended-2-monitors stance (works with 1). `monitor.get_target_monitor()` refactored around a pure, tested `_select_target_monitor()` policy: places opened windows on whichever monitor the foreground game *isn't* on (adapts to which screen you game on; prefers primary as companion; None on single-monitor → window stays behind, no focus steal). Fixed a latent handle-truncation bug (`MonitorFromWindow` had no ctypes signature → the avoid-the-game comparison could silently never match on 64-bit). The clean workaround for exclusive-fullscreen games — content lives on the other display, no overlay/focus fight. Docs: [README "Multiple monitors"](README.md#multiple-monitors-strongly-recommended). Tests: [tests/test_monitor_target.py](tests/test_monitor_target.py) |
 | Focus invariant — enforce on launch + HUD | Full audit of every focus-affecting path ([ROADMAP "Focus-policy architecture & audit"]). Fixed the two flagship-breaking violations: **app launch** now captures the foreground when a game/protected app owns the screen and restores it after (`apps._capture_focus_guard`/`_restore_foreground`, gated by `game_protection`); **HUD open** uses `showInactive()`+visibility-toggle instead of `show()`+`focus()` so "show hud" never pulls focus off a game. Tests: [tests/test_focus_policy.py](tests/test_focus_policy.py). Remaining (documented): fresh-browser launch race → folds into a chosen-browser primitive; config panels → gray |

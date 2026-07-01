@@ -5,7 +5,6 @@ import re
 import urllib.error
 import urllib.parse
 import urllib.request
-import webbrowser
 from pathlib import Path
 
 import core.session as _sess_mod
@@ -189,47 +188,15 @@ def test_brave_key(key: str = None) -> dict:
         return {'ok': False, 'message': f'Could not reach Brave: {e}'}
 
 
-# ── Firefox fallback (when in-app DDG results are turned off) ───────────────
-
-def _firefox_search(query: str) -> str:
-    """Open the search in Firefox and raise it over the foreground game without
-    stealing focus. Reuses the no-activate launch + no-focus raise primitives."""
-    import ctypes
-    import threading
-    import time
-    from commands.apps import find_firefox
-    from core.window_ops import raise_to_top_no_focus, fullscreen_app_running
-    from commands.tiling import find_window_by_spoken_name
-
-    url = 'https://duckduckgo.com/?q=' + urllib.parse.quote_plus(query)
-    firefox = find_firefox()
-    if not firefox:
-        # Firefox not installed/findable — still get results in the default browser.
-        webbrowser.open(url)
-        return f"Searching for {query}"
-    # SW_SHOWNOACTIVATE = 4: ask the OS to open without taking foreground. The
-    # foreground lock usually keeps the game focused; the raise below guarantees
-    # the tab is visible over it.
-    # ponytail: launch-focus is OS-dependent; the no-focus raise is the guarantee.
-    ctypes.windll.shell32.ShellExecuteW(None, "open", firefox, url, None, 4)
-
-    def _raise():
-        time.sleep(1.2)  # let Firefox create/raise the window
-        if fullscreen_app_running():
-            return  # a game owns the screen — leave Firefox in the background
-        match = find_window_by_spoken_name('firefox')
-        if match:
-            raise_to_top_no_focus(match['hwnd'])
-    threading.Thread(target=_raise, daemon=True).start()
-    return f"Searching Firefox for {query}"
-
-
 # ── Intent handlers ────────────────────────────────────────────────────────
 
 def web_search(query: str) -> str:
-    """Direct DDG search — fallback when result list fetch fails."""
+    """Open a DDG search in the chosen browser, surfaced beside the task without
+    stealing focus (core.browser). Fallback when the in-app result list is off or
+    a fetch fails."""
+    from core import browser
     url = f"https://duckduckgo.com/?q={urllib.parse.quote_plus(query)}"
-    webbrowser.open(url)
+    browser.open_url(url)
     return f"Searching for {query}"
 
 
@@ -241,9 +208,10 @@ def web_search_list(query: str):
     """
     from core.response import SiteList
     from core import features
-    # In-app DDG results are an alpha feature; when off, fall back to Firefox.
+    # In-app DDG results are an alpha feature; when off, open the search in the
+    # chosen browser (focus-safe via core.browser).
     if not features.get('inapp_search'):
-        return _firefox_search(query)
+        return web_search(query)
     # Hard 6s cap: a throttled/stalled DDG can never hang the assistant on
     # "Thinking" — bail to the browser fallback instead.
     results = _with_deadline(_fetch_search_results, query, seconds=6.0) or []
@@ -281,7 +249,8 @@ def go_to_site(destination: str) -> str:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
-    webbrowser.open(url)
+    from core import browser
+    browser.open_url(url)
     return f"Opening {destination}"
 
 
@@ -295,8 +264,32 @@ def select_site(n: int) -> str:
         return f"Say a number between 1 and {len(sess.site_list)}."
     site = sess.site_list[n - 1]
     _sess_mod.reset()
-    webbrowser.open(site['url'])
+    from core import browser
+    browser.open_url(site['url'])
     return f"Opening {site['title']}"
+
+
+# ── Chosen browser ─────────────────────────────────────────────────────────
+
+def set_web_browser(text: str) -> str:
+    """Voice: 'use chrome as my browser' / 'set my browser to firefox' /
+    'open searches in edge' → persist the chosen browser (core.browser)."""
+    from core import browser
+    t = (text or '').lower()
+    key = None
+    for name in ('firefox', 'chrome', 'edge', 'brave'):
+        if name in t:
+            key = name
+            break
+    if key is None and re.search(r'\bdefault\b', t):
+        key = 'default'
+    if key is None:
+        return ("Which browser? I know Firefox, Chrome, Edge, Brave, or your "
+                "default browser.")
+    ok, label = browser.set_browser(key)
+    if not ok:
+        return label
+    return f"Okay, I'll open links in {label}."
 
 
 def select_site_by_title(partial: str) -> str:

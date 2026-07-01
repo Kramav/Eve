@@ -361,6 +361,11 @@ INTENTS = [
     (r"(?:close|quit|exit)\s+(.+)",                               apps.close_app),
     (r"kill\s+(.+)",                                              apps.kill_app),
 
+    # Chosen browser — where links/searches open (focus-safe via core.browser).
+    # Verbs (set/change/use/make …browser) don't collide with the app or nav verbs.
+    (r"(?:set|change|switch)\s+(?:my\s+)?(?:default\s+)?(?:web\s+)?browser\s+(?:to|too)\s+(.+)",  search.set_web_browser),
+    (r"(?:use|make)\s+(\w+)\s+(?:as\s+)?(?:my\s+)?(?:default\s+)?(?:web\s+)?browser\b",           search.set_web_browser),
+
     # Direct navigation
     (r"(?:go to|navigate to|take me to|visit|browse to)\s+(.+)",  search.go_to_site),
 
