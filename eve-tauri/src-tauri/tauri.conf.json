@@ -22,7 +22,9 @@
         "resizable": false,
         "shadow": false,
         "focus": false,
-        "center": true
+        "focusable": false,
+        "visible": false,
+        "visibleOnAllWorkspaces": true
       }
     ],
     "security": {
