@@ -490,10 +490,33 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
     Behaviour-identical (no built-in feature gating, matching prior behaviour) — full suite green incl.
     `test_dispatch`'s 32 routing assertions. `INTENTS` stays the source of truth (patterns unchanged); only
     the *matching strategy* changed from list position to priority + literal-match specificity.
-    **Remaining (polish, optional):** (1) flatten priorities cluster-by-cluster so literal specificity
-    takes over and the audit's order-dependent set shrinks toward empty; (2) optionally enable built-in
-    feature gating by passing `feature_get=_features.get` to `.best()` (a deliberate behaviour change —
-    built-ins don't currently gate at the dispatch loop).
+    **PRIORITY BANDING landed:** greedy catch-alls (`open_app`/`close_app`/`kill_app`/`go_to_site`/
+    `web_search_list`) are demoted to band -1 via `_CATCHALL_PRIORITY` -> `from_intents(..., priority_map)`;
+    everything else defaults to band 0 where **literal-match specificity + stable order** decide. A catch-all
+    can now never shadow a more specific intent *regardless of table position* — the audit's #1 fragility
+    (every "open <panel>" also matches open_app) is structurally impossible, not just order-saved.
+    Behaviour-preserving on all canonical phrases (parity test `test_banded_registry_matches_first_match...`
+    + `test_catchalls_demoted_below_specifics`). Two explicit priority nudges in `_INTENT_PRIORITY` finish
+    the job: catch-alls at -1, `toggle_overlay` at +1 (owns the overlay/hud/interface verbs outright).
+    **✅ Audit repointed + fragility eliminated:** `tests/test_intent_audit.py` now tests the REAL router
+    (`d._registry()`), and its order-dependent set is **empty** — every one of the original 7 raw-overlap
+    canonical phrases (5× "open <panel>", "snap X to top", "hide interface") is resolved by priority or
+    specificity, not table position. `test_banding_resolved_the_open_panel_shadows` is the headline-win guard.
+    **✅ route() repointed → real-router tests + found bugs.** `test_dispatch`'s `route()` helper now
+    resolves through `d._registry().best(text, feature_get=features.get)` — its 34 assertions test the
+    ACTUAL router. This immediately surfaced (a) a **latent regex bug**: `media_play_pause`'s
+    `(?:pause|play|resume)` had no `\b`, so "play" matched inside "dis*play*" ("name monitor 2 primary
+    display" mis-routed) — fixed by adding word boundaries to the media/mute patterns; and (b) two genuine
+    specificity ambiguities the old list order had masked — "label display 1 gaming" (identify_monitors
+    captures nothing → beat name_monitor) and "move hud to monitor 2" (a generic snap shim captured less →
+    beat move_hud). Both resolved by the **+1 "specific-target" band** in `_INTENT_PRIORITY`
+    (name_monitor, move_hud, move_orb_corner, _snap_hud_zone_monitor). Net: the registry's specificity
+    scorer is a *feature* — it exposes latent overlap bugs the position-ordered wall silently tolerated.
+    **Built-in feature gating — DECIDED (2026-07-01): won't build.** Passing `feature_get` would make a
+    disabled flag stop its built-in, BUT the phrase then falls through to a *different* built-in (tiling off
+    → "snap X to top" → `bring_to_front`) — a silent mis-route. Refusing a direct command is hostile; the
+    good UX ("do it, then offer to enable the feature") is a DIL behaviour, not a gating one. So flags govern
+    UI/skills only, never core routing; `.best()` stays un-gated.
   - **Tier B — local semantic fallback (opt-in, CPU).** Swap the fuzzy tier (`core/intent_match.py`,
     lexical rapidfuzz `token_set_ratio`) for a local sentence-embedding classifier (MiniLM via
     `onnxruntime`, ~80MB, CPU-ms — reuses the vision stack's optional onnxruntime dep). Embeds the
@@ -508,6 +531,15 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 - **Dynamic Intent Learning — verified adaptive training** *(big bet; builds directly on the Intent
   engine rework above — Tier A is its prerequisite).* Eve learns from **verified successful** LLM-fallback
   interactions so the local engine becomes the primary path and LLM inference grows rare over time.
+  - **Phase 1 — DONE (2026-07-01): verified outcome tracking substrate.** `core/intent_learning.py` —
+    `verify(result, error)` execution verifier (ponytail heuristic: exception/None/False/blank = fail;
+    per-intent verifiers later), `wilson_lower_bound()` confidence (0 trials → 0.0, small-sample-honest),
+    `TrainingStore` (per-intent `[successes, failures]` persisted atomically to `intent_training.json`,
+    best-effort), `apply_to(registry)` hydrating counts at startup (builtins pinned 1.0, learned intents
+    evidence-based). Wired LIVE in `dispatch()` — records every built-in outcome (exception → verified fail,
+    re-raised; behaviour unchanged). `tests/test_intent_learning.py` (10). This is the substrate every
+    stage below consumes; **before the promotion ladder can run, build the producer of *learned* intents
+    (the LLM-fallback capture step) — nothing generates candidates yet.**
   **Core principle: never learn from an LLM response alone — only from verified outcomes.** The LLM is a
   *teacher* that interprets unfamiliar requests; verified execution + user feedback are the real learning.
   - **Pipeline:** manual matcher → learned intents → learned aliases → LLM fallback (last resort); first

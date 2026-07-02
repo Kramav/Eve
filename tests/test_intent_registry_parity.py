@@ -85,6 +85,37 @@ def test_registry_parity_with_first_match_loop():
         f"  {p!r}: registry={g}  first-match={w}" for p, g, w in mismatches)
 
 
+def test_banded_registry_matches_first_match_on_canonical_phrases():
+    """The BANDED registry dispatch() actually uses (catch-alls demoted to a
+    lower band; specificity resolves the rest) still routes every canonical
+    phrase to the same handler as the old first-match loop — i.e. demoting the
+    catch-alls + letting specificity take over is behaviour-preserving on real
+    commands, while removing the list-position fragility."""
+    reg = d._registry()
+    mismatches = []
+    for phrase in PHRASES:
+        norm = _normalize(phrase)
+        want = _first_match_handler(norm)
+        hit = reg.best(norm)
+        got = hit[0].handler if hit else None
+        if got is not want:
+            mismatches.append(
+                (phrase, getattr(got, "__name__", None), getattr(want, "__name__", None)))
+    assert not mismatches, "banded registry != first-match for:\n" + "\n".join(
+        f"  {p!r}: banded={g}  first-match={w}" for p, g, w in mismatches)
+
+
+def test_catchalls_demoted_below_specifics():
+    from commands import apps as _apps, search as _search
+    demoted = {_apps.open_app, _apps.close_app, _apps.kill_app,
+               _search.go_to_site, _search.web_search_list}
+    for it in d._registry().all():
+        if it.handler in demoted:
+            assert it.priority < 0, f"{it.name} not demoted (priority {it.priority})"
+        else:
+            assert it.priority >= 0, f"{it.name} unexpectedly demoted ({it.priority})"
+
+
 def test_explain_last_after_dispatch():
     # dispatch a side-effect-free built-in, then ask why it routed that way.
     from core import session as S

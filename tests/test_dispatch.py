@@ -21,10 +21,10 @@ from commands import (apps, search, system, windows as windows_cmd,
 
 
 def route(text: str):
-    """The handler dispatcher.INTENTS would fire for `text`, NOT executed.
+    """The handler dispatcher would fire for `text`, NOT executed.
 
-    Mirrors dispatch()'s normalization (lowercase, strip trailing punctuation,
-    strip wake prefix) and the _try_intents loop incl. feature gating, but
+    Tests the REAL router — the scored intent registry dispatch() uses (banded
+    priorities + literal-match specificity), with feature gating applied — and
     returns the handler object instead of calling it."""
     text = text.strip().lower()
     text = re.sub(r"[.,!?]+$", "", text).strip()
@@ -32,13 +32,8 @@ def route(text: str):
         if text.startswith(prefix):
             text = text[len(prefix):].strip(",. ")
             break
-    for pattern, handler in d.INTENTS:
-        if re.search(pattern, text):
-            feat = d._HANDLER_FEATURE.get(handler)
-            if feat and not features.get(feat):
-                continue
-            return handler
-    return None
+    hit = d._registry().best(text, feature_get=features.get)
+    return hit[0].handler if hit is not None else None
 
 
 # ── System / media / panels ───────────────────────────────────────────────────

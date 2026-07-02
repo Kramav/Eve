@@ -151,27 +151,34 @@ class IntentRegistry:
         return s
 
 
-def from_intents(intents, feature_map=None) -> "IntentRegistry":
-    """Migration bridge: build a registry from a first-match-ordered
-    ``[(regex, handler)]`` list (i.e. core.dispatcher.INTENTS), *preserving its
-    semantics exactly* — earlier entries get strictly higher priority, so the
-    registry's best-match == the list's first-match.
+def from_intents(intents, feature_map=None, priority_map=None) -> "IntentRegistry":
+    """Build a registry from a first-match-ordered ``[(regex, handler)]`` list
+    (i.e. core.dispatcher.INTENTS).
 
-    This lets the registry drop in for the ordered `for … in INTENTS` loop with
-    provably identical routing (see tests/test_intent_registry_parity.py). After
-    the swap, priorities can be flattened incrementally — letting the literal-
-    match specificity scorer take over — one cluster at a time, with the parity
-    + audit tests catching any behaviour change.
+    Two modes:
+      * **Bridge (priority_map=None):** earlier entries get strictly higher
+        priority, so best-match == the list's first-match *exactly*. Used to
+        prove the swap is behaviour-preserving (tests/test_intent_registry_parity).
+      * **Banded (priority_map given):** every handler defaults to band 0; the
+        map overrides specific handlers (e.g. greedy catch-alls → -1). Within a
+        band the scorer's literal-match specificity + stable order decide — so
+        routing no longer depends on list position, only on how specific each
+        pattern is. This is what dispatch() uses; a catch-all can never shadow a
+        more specific intent regardless of where it sits in the table.
     """
     reg = IntentRegistry()
     n = len(intents)
     fmap = feature_map or {}
     for i, (pat, handler) in enumerate(intents):
+        if priority_map is None:
+            prio = n - i                    # bridge: position → unique descending
+        else:
+            prio = priority_map.get(handler, 0)   # banded: default 0, overrides demote/promote
         reg.add(Intent(
             name=getattr(handler, "__name__", f"intent_{i}"),
             handler=handler,
             patterns=[pat],
-            priority=n - i,                 # position → strictly descending priority
+            priority=prio,
             feature=fmap.get(handler),
         ))
     return reg

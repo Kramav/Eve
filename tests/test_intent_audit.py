@@ -41,11 +41,20 @@ def _normalize(text: str) -> str:
     return text
 
 
-def _matching_handlers(text: str) -> list:
-    """Every built-in handler whose pattern matches `text`, in table order
-    (feature gating ignored — this audits the regex overlaps themselves)."""
+from core.intent_registry import _captured_len
+
+
+def _raw_matches(text: str) -> list:
+    """Handlers whose RAW pattern matches — a lint on the INTENTS table itself
+    (shows which patterns still overlap; the registry resolves them without
+    relying on order)."""
     norm = _normalize(text)
     return [h for pat, h in d.INTENTS if re.search(pat, norm)]
+
+
+def _registry_ranked(text: str) -> list:
+    """The REAL router's matches, best-first: [(intent, match), ...]."""
+    return d._registry().matches(_normalize(text))
 
 
 # Canonical phrase → the handler it MUST route to. One representative per major
@@ -75,60 +84,70 @@ CANONICAL = {
     "remind me to call mom at 3pm": ctx_cmd.remind,
 }
 
-# Phrases whose text matches >1 distinct handler and therefore route correctly
-# ONLY because of table ordering. Documented on purpose; a NEW entry means a
-# fresh ordering dependency crept in — investigate before whitelisting it.
-#
-# What the audit revealed about the current wall (the fragility Tier-A fixes):
-#   * Every "open <panel>" command ALSO matches apps.open_app ("open <X>"). They
-#     route right only because the panel intents sit ABOVE open_app; reorder them
-#     below and "open app manager" tries to launch an app called "app manager".
-#   * "hide interface" matches both the overlay toggle and hide_directory
-#     (the `interface` synonym lives in both); toggle wins by position.
-#   * "snap X to top" matches snap_app AND bring_to_front ("to top" z-order).
-_ORDER_DEPENDENT = {
-    "open app manager",      # + apps.open_app
-    "open window manager",   # + apps.open_app
-    "open voice settings",   # + apps.open_app
-    "open command editor",   # + apps.open_app
-    "open api keys",         # + apps.open_app
-    "hide interface",        # toggle_overlay + hide_directory
-    "snap firefox to top",   # snap_app + bring_to_front
-}
+# A phrase is a GENUINE tie (still order-dependent) only when the registry's top
+# two matches share BOTH priority AND literal-match specificity — so only stable
+# insertion order separates them. Priority banding + specificity + two explicit
+# priority nudges (`_INTENT_PRIORITY`) resolved ALL of the original 7 raw-overlap
+# canonical phrases by design: the five "open <panel>" phrases (open_app demoted),
+# "snap X to top" (snap wins by specificity), and "hide interface" (toggle_overlay
+# promoted). So the set is now EMPTY — no canonical command routes correctly only
+# because of table position. A new entry means real ambiguity to resolve.
+_TRUE_TIES = set()
 
 
-def test_canonical_phrase_routes_to_intended_handler():
-    """The ordering must make the intended handler win (first match)."""
+def test_registry_routes_canonical_to_intended_handler():
+    """The REAL router (banded registry) sends each canonical phrase to its
+    intended handler — order-independently."""
     for phrase, intended in CANONICAL.items():
-        matches = _matching_handlers(phrase)
-        assert matches, f"{phrase!r} matched no intent at all"
-        assert matches[0] is intended, (
-            f"{phrase!r} routed to {matches[0].__name__}, expected {intended.__name__}")
+        hit = d._registry().best(_normalize(phrase))
+        assert hit is not None, f"{phrase!r} matched no intent"
+        assert hit[0].handler is intended, (
+            f"{phrase!r} routed to {hit[0].handler.__name__}, expected {intended.__name__}")
 
 
-def test_no_new_order_dependent_phrases():
-    """Every phrase that only routes correctly because of ordering must be
-    documented. A new one failing here is the point — it flags fresh fragility."""
-    order_dependent = set()
+def test_no_new_true_ties():
+    """Genuine scoring ties (only insertion order separates the top two) must be
+    documented. A new one means real ambiguity crept in — resolve it with an
+    explicit priority or a more specific pattern, don't just whitelist it."""
+    ties = set()
     for phrase in CANONICAL:
-        distinct = {h for h in _matching_handlers(phrase)}
-        if len(distinct) > 1:
-            order_dependent.add(phrase)
-    new = order_dependent - _ORDER_DEPENDENT
+        ranked = _registry_ranked(phrase)
+        if len(ranked) < 2:
+            continue
+        (i1, m1), (i2, m2) = ranked[0], ranked[1]
+        if i1.priority == i2.priority and _captured_len(m1) == _captured_len(m2):
+            ties.add(phrase)
+    new = ties - _TRUE_TIES
     assert not new, (
-        "New order-dependent phrases (multiple handlers match; only ordering "
-        f"saves them): {sorted(new)}. Investigate, then add to _ORDER_DEPENDENT.")
+        f"New genuine scoring ties (order-dependent): {sorted(new)}. "
+        "Resolve with an explicit priority or a more specific pattern.")
+
+
+def test_banding_resolved_the_open_panel_shadows():
+    """Headline-win regression guard: every 'open <panel>' phrase still raw-
+    matches open_app (the table overlaps), but the registry now resolves it by
+    PRIORITY, not table order — open_app can never win."""
+    for phrase in ("open app manager", "open window manager", "open voice settings",
+                   "open command editor", "open api keys"):
+        assert apps.open_app in _raw_matches(phrase)              # still overlaps
+        ranked = _registry_ranked(phrase)
+        assert ranked[0][0].handler is not apps.open_app         # but never wins
+        assert ranked[0][0].priority > ranked[1][0].priority     # won by priority
 
 
 def _report():
-    """Human-readable overlap map — how many distinct handlers each canonical
-    phrase matches. Printed by the standalone runner for eyeballing the wall."""
+    """How each canonical phrase resolves: raw table overlaps → registry winner."""
     lines = []
     for phrase in CANONICAL:
-        hs = _matching_handlers(phrase)
-        distinct = list(dict.fromkeys(h.__name__ for h in hs))
-        flag = "  <-- order-dependent" if len(distinct) > 1 else ""
-        lines.append(f"  {phrase!r}: {distinct}{flag}")
+        raw = list(dict.fromkeys(h.__name__ for h in _raw_matches(phrase)))
+        ranked = _registry_ranked(phrase)
+        if ranked:
+            winner = ranked[0][0].name
+            reason = d._registry().explain(_normalize(phrase))["reason"]
+        else:
+            winner, reason = None, "no match"
+        flag = "  <-- raw overlap" if len(raw) > 1 else ""
+        lines.append(f"  {phrase!r}: raw={raw} -> {winner} ({reason}){flag}")
     return "\n".join(lines)
 
 

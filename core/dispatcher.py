@@ -410,10 +410,13 @@ INTENTS = [
     (r"\b(?:disconnect|hang\s+up)(?:\s+(?:from\s+)?(?:voice|call|discord))?\b",               discord_cmd.disconnect),
     (r"\bleave\s+(?:the\s+)?(?:voice|call|discord)\b",                                        discord_cmd.disconnect),
 
-    (r"(?:mute|unmute)",                                         system.toggle_mute),
-    (r"(?:pause|play|resume)",                                   system.media_play_pause),
-    (r"next (?:song|track|one)",                                 system.media_next),
-    (r"(?:previous|last|back) (?:song|track|one)",              system.media_prev),
+    (r"\b(?:mute|unmute)\b",                                     system.toggle_mute),
+    # \b required: without it "play" matches inside "dis*play*" (broke
+    # "name monitor 2 primary display"). The registry's specificity scorer
+    # surfaced this latent bug that the old list order had masked.
+    (r"\b(?:pause|play|resume)\b",                               system.media_play_pause),
+    (r"\bnext\s+(?:song|track|one)\b",                           system.media_next),
+    (r"\b(?:previous|last|back)\s+(?:song|track|one)\b",         system.media_prev),
 
     # System
     (r"take (?:a )?screenshot",                                  system.screenshot),
@@ -724,13 +727,51 @@ def _handle_converse(text: str):
 # the old loop (no feature gating here, matching prior behaviour); proven by
 # tests/test_intent_registry_parity.py. To start gating built-ins, pass
 # feature_get=_features.get to .best() — a deliberate, separate change.
+# Explicit priority bands for the registry. Everything defaults to band 0 where
+# literal-match specificity + stable order resolve overlaps; this map only names
+# the exceptions:
+#   -1  greedy catch-alls (match almost any "<verb> <rest>") — demoted so they
+#       can NEVER shadow a more specific intent regardless of table position
+#       (the audit's #1 fragility: every "open <panel>" also matches open_app).
+#   +1  toggle_overlay — owns the overlay/hud/interface verbs outright; wins over
+#       the directory show/hide intent that also matches "hide interface" etc.,
+#       by design rather than by insertion order (removes the last genuine tie).
+_INTENT_PRIORITY = {
+    apps.open_app:          -1,
+    apps.close_app:         -1,
+    apps.kill_app:          -1,
+    search.go_to_site:      -1,
+    search.web_search_list: -1,
+    # +1 "specific-target" band: intents a broader/greedier pattern would else win
+    # on specificity, but which are semantically the right target. (These were
+    # disambiguated by list position in the old wall; priority makes it explicit.)
+    system.toggle_overlay:  +1,   # owns overlay/hud/interface verbs vs directory show/hide
+    wm.name_monitor:        +1,   # "label display 1 gaming" = naming, not identify_monitors
+    wm.move_hud:            +1,   # "move hud to monitor 2" relocates the orb, not a generic snap
+    wm.move_orb_corner:     +1,   # "move hud to <corner>" pins the orb
+    _snap_hud_zone_monitor: +1,   # "move hud to <zone> of monitor N" snaps the panel (beats move_hud by specificity)
+}
+
 _REGISTRY = None
 def _registry():
     global _REGISTRY
     if _REGISTRY is None:
         from core.intent_registry import from_intents
-        _REGISTRY = from_intents(INTENTS, _HANDLER_FEATURE)
+        _REGISTRY = from_intents(INTENTS, _HANDLER_FEATURE, _INTENT_PRIORITY)
     return _REGISTRY
+
+
+# Dynamic Intent Learning (Phase 1): verified outcome store, hydrated onto the
+# registry at first use so persisted counts survive restarts. Recording only —
+# no routing effect yet (builtins stay confidence 1.0).
+_STORE = None
+def _store():
+    global _STORE
+    if _STORE is None:
+        from core.intent_learning import TrainingStore
+        _STORE = TrainingStore()
+        _STORE.apply_to(_registry())
+    return _STORE
 
 
 # Last text routed through the built-in registry — powers explain_last() (the
@@ -816,7 +857,13 @@ def dispatch(text: str):
             global _LAST_TEXT
             _LAST_TEXT = text
         groups = m.groups()
-        return _intent.handler(*groups) if groups else _intent.handler()
+        try:
+            result = _intent.handler(*groups) if groups else _intent.handler()
+        except Exception:
+            _store().record(_intent.name, False)   # DIL: exception = verified fail
+            raise                                   # behaviour unchanged: propagate
+        _store().record_result(_intent.name, result, None)
+        return result
 
     # Drop-in skills (skills/*.py) — extend the built-ins without editing core.
     # Tried after built-ins so they add commands rather than override them.
