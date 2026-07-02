@@ -131,10 +131,10 @@ search by voice — the game should keep focus in all three.
 3. **Architecture & maintainability.** Pay down technical debt; keep the system modular, extensible,
    and scalable to many future skills. Favor long-term maintainability over short-term convenience.
    → see **Architecture**.
-4. **Foundation reconsideration (Electron → ?).** Open to replacing Electron *if* it's a clear
-   long-term win (startup, memory, responsiveness, UI/animation smoothness, maintainability) — but
-   **only after** a written tradeoff/effort/risk/migration analysis is reviewed. No rewrite for its own
-   sake. → see **Foundation — desktop shell**.
+4. **Foundation migration (Electron → Tauri) — DECIDED (2026-07-01), buildout coded (2026-07-02).**
+   Maintainer chose Tauri; the parallel shell at `eve-tauri/` is fully coded (orb, all panels,
+   overlays, tray, YouTube HUD) and compiles — pending visual verification before cutover. Electron
+   stays runnable side-by-side until Tauri fully works. → see **Foundation — desktop shell**.
 
 **Design principles for every decision:** speed · responsiveness · smooth UX · elegant UI · low
 resource use · clean architecture · maintainability · extensibility. **Every new feature must justify
@@ -164,7 +164,7 @@ next. Links point to the detail.
 | **2 · Performance** | Perf pass #1 (orb throttle, hot-reload gate, dispatch cache, hidden clock) | ✅ done → [Performance](#performance--efficiency-north-star-2) |
 | **2 · Performance** | Live profiler run to confirm idle-CPU drop | ⏳ needs a daily-use moment |
 | **2 · Performance / UX** | STT model options page — pick Whisper model + CPU/GPU per hardware (the biggest felt-latency lever) | ⏳ next candidate → [Voice / UX](#voice--ux) |
-| **4 · Foundation** | Electron → Tauri/native reconsideration | ⏳ parked pending perf numbers → [Foundation](#foundation--desktop-shell-north-star-4) |
+| **4 · Foundation** | Electron → Tauri migration (full parallel buildout) | ⏳ coded + compiles; pending visual verify, then cutover → [Foundation](#foundation--desktop-shell-north-star-4) |
 
 **Daily-drive verification queue** (things that need real use to confirm, not just tests): focus invariant
 under a real fullscreen game (launch an app + open the HUD by voice — game keeps focus); exclusive-fullscreen
@@ -393,8 +393,20 @@ places to reason about latency and correctness.
 
 ## Foundation — desktop shell (North Star #4)
 
-> **Open to replacing Electron, but not before a written analysis is reviewed.** No rewrite for its own
-> sake. This entry is the *placeholder for that analysis*, not a decision.
+> **DECIDED (2026-07-01): migrating to Tauri.** Maintainer made the call; the analysis-first gate below
+> is history. Strategy honored: **build in parallel, verify fully, only then remove Electron.**
+
+**Status (2026-07-02): full buildout CODED — compiles, pending visual verify.** The parallel shell lives
+at `eve-tauri/` (Tauri v2, `frontendDist` → `ui/src`, so it serves the *same pages* Electron does).
+Architecture: thin Rust ([lib.rs](eve-tauri/src-tauri/src/lib.rs) — file I/O commands, YouTube JS
+injection, exe-picker, tray) + a JS port of `ui/main.js` running in the orb window
+([ui/src/eve-tauri-shell.js](ui/src/eve-tauri-shell.js)) + a full `window.eve` bridge
+([ui/src/eve-tauri-shim.js](ui/src/eve-tauri-shim.js)) loaded by every page (no-op under Electron —
+pages run unmodified on both shells). Verify: `python main.py`, then `cd eve-tauri && npm run tauri dev`.
+Cutover (flip launcher, delete `ui/main.js`/`preload.js`/electron dep) only after soak. Full detail +
+compat notes in the session memory (`project_tauri_migration.md`).
+
+<details><summary>Historical: the pre-decision analysis gate (kept for the record)</summary>
 
 **When to seriously evaluate:** after the performance audit above produces real numbers. If Electron
 renderer memory / startup / animation smoothness turn out to be a material drag on the "feels instant"
@@ -423,7 +435,9 @@ present tradeoffs, effort, risks, and strategy *first*):
 **Recommendation until then:** *don't migrate yet.* Get the numbers first; Tauri is the most likely
 target if the numbers justify a move (it preserves the web-panel investment), but the audit decides.
 
-### Electron integration points — running catalog for the migration (maintainer flagged a likely switch)
+</details>
+
+### Electron integration points — the migration checklist (now: how each point was ported)
 
 Track everything that *actually* touches Electron so the migration has a checklist and new work doesn't
 quietly grow the surface. **Guiding rule going forward: prefer Python for OS/logic; only reach for
@@ -431,20 +445,27 @@ Electron when it's genuinely UI.** (Example set 2026-07-01: the "Eve monitor" de
 implemented **entirely in Python** — `enumerate_work_areas()` gives physical rects directly, so no
 `dipToScreenRect`/WS round-trip was needed — specifically to avoid adding to this list.)
 
-Current Electron-coupled surface (all in `ui/`, driven by the WS/IPC contract):
+Electron-coupled surface and its Tauri port status (2026-07-02 — all coded, pending visual verify):
 - **Windowing:** the orb, routing directory, and ~13 managed panels (`createManagedWindow`), incl. the
-  z-order tricks that must be re-proven on any new shell — topmost-above-fullscreen, `showInactive`,
-  transparent frameless + NC-border fix, `setVisibleOnAllWorkspaces`, per-monitor DPI `dipToScreenRect`.
-- **Display identity:** `overlayDisplayId` (HUD monitor) + `resolveDisplay()` + `identifyMonitors()` use
-  **Electron's** `screen.getAllDisplays()` ordering — the one place monitor *numbering* is Electron's,
-  not Python's. Post-migration this must move to Python enumeration (which the Eve-monitor feature
-  already uses) or a stable shared identity. *(This is why spoken "monitor 2" can differ from Python's
-  index today — noted for the port.)*
-- **Renderers:** all panel UIs are HTML/CSS/JS (Tauri keeps these; native would rewrite them).
-- **Misc host APIs:** tray icon, `shell.openExternal`, `webContents.setZoomFactor` (UI scale), native
-  file picker (command editor), `dipToScreenRect` (tiling physical rects).
-- **Settings writers:** both Electron *and* Python write `settings.json` — after migration, consolidating
-  the writer (or keeping the merge-on-write discipline) matters.
+  z-order tricks — **ported** in [eve-tauri-shell.js](ui/src/eve-tauri-shell.js). The `showInactive`
+  equivalent was re-proven at the tao-source level: `focus:false` gives `SW_SHOWNOACTIVATE` **only on a
+  window's first show**, so focus-sensitive surfaces (directory, overlays, YouTube) are created on open
+  and destroyed on close, never re-shown; raises are `setAlwaysOnTop` pulses (`SWP_NOACTIVATE`).
+  Topmost-above-fullscreen has no Electron 'screen-saver' tier in Tauri — plain always-on-top + 2s
+  re-assert; **must be verified over a real borderless-fullscreen game.**
+- **Display identity:** monitor id under Tauri is the **device name string** (`\\.\DISPLAY1`), not
+  Electron's numeric id — saved `overlayDisplayId`/tiling keys from Electron won't match (re-pin HUD +
+  re-apply presets once). The "move to Python enumeration or a stable shared identity" consolidation is
+  still the right post-cutover cleanup. Tauri coords are **physical px** (same space as Python's Win32),
+  which deleted the `dipToScreenRect` conversion entirely.
+- **Renderers:** all panel UIs port **unmodified** — same HTML/CSS/JS served by `frontendDist`; the only
+  edit was adding the shim `<script>` tag to each page.
+- **Misc host APIs:** tray icon (Rust), `openExternal`/file picker/YouTube JS-injection (Rust commands),
+  UI scale via webview `setZoom` (panels self-zoom on load). Display-change events don't exist in Tauri —
+  5s poll, upgrade to a Rust `WM_DISPLAYCHANGE` hook if it shows.
+- **Settings writers:** unchanged by design (behaviour-preserving migration) — Tauri shell does the same
+  read-merge-write to `settings.json` via Rust `file_get`/`file_set`. Consolidating the writer into
+  Python is still a post-cutover cleanup.
 
 ---
 
