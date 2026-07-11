@@ -518,27 +518,41 @@ class Display:
         except Exception:
             return []
 
-    # ── run_loop: launch Electron, block until it exits ─────────────────────
+    # ── run_loop: launch the UI shell (Tauri), block until it exits ─────────
+    #
+    # Cutover (2026-07-10): Tauri is the default shell. Escape hatches while
+    # Electron soaks toward deletion:
+    #   EVE_NO_ELECTRON=1 / EVE_NO_UI=1 — spawn no shell (run `npm run tauri
+    #     dev` yourself; Python core + WS server stay up until Ctrl-C).
+    #   EVE_UI=electron — spawn the old Electron shell.
+    # If the Tauri exe hasn't been built yet, falls back to Electron with a
+    # hint (build: cd eve-tauri && npm run tauri build -- --no-bundle).
 
     def run_loop(self):
-        # Tauri migration: EVE_NO_ELECTRON=1 skips the Electron spawn so the
-        # Tauri shell can be run instead (cd eve-tauri && npm run tauri dev).
-        # Python core + WS server stay up until Ctrl-C.
-        if os.environ.get('EVE_NO_ELECTRON'):
+        if os.environ.get('EVE_NO_ELECTRON') or os.environ.get('EVE_NO_UI'):
             try:
                 threading.Event().wait()
             except KeyboardInterrupt:
                 pass
             return
 
-        ui_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ui'))
+        root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        tauri_exe = os.path.join(root, 'eve-tauri', 'src-tauri', 'target', 'release',
+                                 'eve-tauri.exe' if sys.platform == 'win32' else 'eve-tauri')
 
-        if sys.platform == 'win32':
-            electron = os.path.join(ui_dir, 'node_modules', '.bin', 'electron.cmd')
-            proc = subprocess.Popen([electron, '.'], cwd=ui_dir, shell=True)
+        if os.environ.get('EVE_UI', '').lower() != 'electron' and os.path.exists(tauri_exe):
+            proc = subprocess.Popen([tauri_exe], cwd=root)
         else:
-            electron = os.path.join(ui_dir, 'node_modules', '.bin', 'electron')
-            proc = subprocess.Popen([electron, '.'], cwd=ui_dir)
+            if os.environ.get('EVE_UI', '').lower() != 'electron':
+                print('[display] Tauri exe not found — falling back to Electron. '
+                      'Build it: cd eve-tauri && npm run tauri build -- --no-bundle')
+            ui_dir = os.path.join(root, 'ui')
+            if sys.platform == 'win32':
+                electron = os.path.join(ui_dir, 'node_modules', '.bin', 'electron.cmd')
+                proc = subprocess.Popen([electron, '.'], cwd=ui_dir, shell=True)
+            else:
+                electron = os.path.join(ui_dir, 'node_modules', '.bin', 'electron')
+                proc = subprocess.Popen([electron, '.'], cwd=ui_dir)
 
         try:
             proc.wait()

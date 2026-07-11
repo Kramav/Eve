@@ -131,10 +131,11 @@ search by voice — the game should keep focus in all three.
 3. **Architecture & maintainability.** Pay down technical debt; keep the system modular, extensible,
    and scalable to many future skills. Favor long-term maintainability over short-term convenience.
    → see **Architecture**.
-4. **Foundation migration (Electron → Tauri) — DECIDED (2026-07-01), buildout coded (2026-07-02).**
-   Maintainer chose Tauri; the parallel shell at `eve-tauri/` is fully coded (orb, all panels,
-   overlays, tray, YouTube HUD) and compiles — pending visual verification before cutover. Electron
-   stays runnable side-by-side until Tauri fully works. → see **Foundation — desktop shell**.
+4. **Foundation migration (Electron → Tauri) — CUT OVER (2026-07-10), soaking.** First live test
+   passed (orb/panels/overlays/WM voice; two fixes applied same-day). `python main.py` now launches
+   the built Tauri exe by default (`eve-tauri/src-tauri/target/release/eve-tauri.exe`, 10 MB).
+   Electron remains as an escape hatch (`EVE_UI=electron`) until the soak period ends — then delete
+   `ui/main.js` + `preload.js` + the electron dep. → see **Foundation — desktop shell**.
 
 **Design principles for every decision:** speed · responsiveness · smooth UX · elegant UI · low
 resource use · clean architecture · maintainability · extensibility. **Every new feature must justify
@@ -164,7 +165,7 @@ next. Links point to the detail.
 | **2 · Performance** | Perf pass #1 (orb throttle, hot-reload gate, dispatch cache, hidden clock) | ✅ done → [Performance](#performance--efficiency-north-star-2) |
 | **2 · Performance** | Live profiler run to confirm idle-CPU drop | ⏳ needs a daily-use moment |
 | **2 · Performance / UX** | STT model options page — pick Whisper model + CPU/GPU per hardware (the biggest felt-latency lever) | ⏳ next candidate → [Voice / UX](#voice--ux) |
-| **4 · Foundation** | Electron → Tauri migration (full parallel buildout) | ⏳ coded + compiles; pending visual verify, then cutover → [Foundation](#foundation--desktop-shell-north-star-4) |
+| **4 · Foundation** | Electron → Tauri migration | ⏳ **cut over 2026-07-10** — Tauri exe is the default shell; soaking, Electron deletable after → [Foundation](#foundation--desktop-shell-north-star-4) |
 
 **Daily-drive verification queue** (things that need real use to confirm, not just tests): focus invariant
 under a real fullscreen game (launch an app + open the HUD by voice — game keeps focus); exclusive-fullscreen
@@ -396,7 +397,14 @@ places to reason about latency and correctness.
 > **DECIDED (2026-07-01): migrating to Tauri.** Maintainer made the call; the analysis-first gate below
 > is history. Strategy honored: **build in parallel, verify fully, only then remove Electron.**
 
-**Status (2026-07-02): full buildout CODED — compiles, pending visual verify.** The parallel shell lives
+**Status (2026-07-10): CUT OVER — Tauri is the default shell, soak in progress.** First live test passed
+(orb topmost over game, panels, identify overlays, WM voice); two same-day fixes: directory raise-over-game
+(topmost pulse after first show) and the youtube feature flag. `core/display.py run_loop` now launches
+`eve-tauri/src-tauri/target/release/eve-tauri.exe` (10 MB) by default; `EVE_UI=electron` = old shell,
+`EVE_NO_UI=1` = no shell (for `npm run tauri dev`). **Workflow note: the release exe EMBEDS `ui/src` at
+build time** — after editing pages, rebuild (`cd eve-tauri && npm run tauri build -- --no-bundle`) or
+develop against dev mode. After soak: delete `ui/main.js`, `ui/preload.js`, electron dep, update installer
+README. The parallel shell lives
 at `eve-tauri/` (Tauri v2, `frontendDist` → `ui/src`, so it serves the *same pages* Electron does).
 Architecture: thin Rust ([lib.rs](eve-tauri/src-tauri/src/lib.rs) — file I/O commands, YouTube JS
 injection, exe-picker, tray) + a JS port of `ui/main.js` running in the orb window
