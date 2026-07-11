@@ -166,6 +166,7 @@ next. Links point to the detail.
 | **2 · Performance** | Live profiler run to confirm idle-CPU drop | ⏳ needs a daily-use moment |
 | **2 · Performance / UX** | STT model options page — pick Whisper model + CPU/GPU per hardware (the biggest felt-latency lever) | ⏳ next candidate → [Voice / UX](#voice--ux) |
 | **4 · Foundation** | Electron → Tauri migration | ⏳ **cut over 2026-07-10** — Tauri exe is the default shell; soaking, Electron deletable after → [Foundation](#foundation--desktop-shell-north-star-4) |
+| **3 · Architecture** | Dynamic Intent Learning — LLM-fallback teacher (llama.cpp + llama-swap) → verified capture → learned tier | ✅ **live 2026-07-10** — learning loop shipping; next: destructive-confirm flow + editor UI surface → [DIL](#p3--low-priority--future) |
 
 **Daily-drive verification queue** (things that need real use to confirm, not just tests): focus invariant
 under a real fullscreen game (launch an app + open the HUD by voice — game keeps focus); exclusive-fullscreen
@@ -560,6 +561,31 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
 - **Dynamic Intent Learning — verified adaptive training** *(big bet; builds directly on the Intent
   engine rework above — Tier A is its prerequisite).* Eve learns from **verified successful** LLM-fallback
   interactions so the local engine becomes the primary path and LLM inference grows rare over time.
+  - **Phases 1–3 (language track) — LANDED (2026-07-10): the learning loop is LIVE.**
+    - **Teacher (LLM fallback, rebuilt):** [commands/fallback.py](commands/fallback.py) now speaks the
+      OpenAI chat-completions protocol against `config.LLM_BASE_URL` — default target **llama-swap**
+      (auto-spawned by [core/llm_host.py](core/llm_host.py) from `bin/llama-swap.exe` +
+      [llama-swap.yaml](llama-swap.yaml); llama.cpp's llama-server underneath, Qwen3-4B-Instruct Q4_K_M
+      in `models/llm/`, `ttl: 600` frees RAM while gaming). Bare llama-server / Ollama `/v1` / LM Studio
+      all work via the same protocol. `FALLBACK_LLM` defaults **on** ("local"); server-down degrades
+      instantly to the old not-recognized reply.
+    - **Capture:** a fallback tool call that VERIFIABLY succeeds (`intent_learning.verify`) is recorded
+      to **`learned_intents.json`** (repo root, transferable) with phrase, tool, args, and an
+      auto-templated pattern (arg values → named groups, only when every value appears verbatim and
+      round-trips).
+    - **Student (learned tier):** dispatch consults `fallback.learned_answer()` just before the LLM —
+      exact phrases serve after ONE verified success; **templated patterns only once TRUSTED**
+      (Wilson ≥ 0.4 ≈ 3 clean successes), so "throw firefox on my left screen" generalizes to
+      "throw chrome on my right screen" only after evidence. Failed learned executions record a failure
+      (revoking pattern trust when confidence drops) and fall through to the LLM.
+    - **Class-based safety (guardrail honored):** `DESTRUCTIVE_TOOLS` (close/kill) are captured for
+      evidence but **never served** by the learned tier at any confidence — pending the confirmation flow.
+    - **Verified:** `tests/test_fallback.py` (13 — templating, trust ladder, destructive gate, protocol
+      parsing, capture hook) + `tests/test_llm_live.py` (live llama-swap smoke: model loads, plain answer,
+      tool call emitted; skips when no host) + suite 16/16 green with a live server running.
+    - **Next:** confirmation flow so destructive mappings can serve; surface learned entries in the
+      command-editor UI (visible/deletable = the auto-updating custom list); extend "why did you do that"
+      to learned mappings; registry unification (learned entries as runtime `Intent`s).
   - **Phase 1 — DONE (2026-07-01): verified outcome tracking substrate.** `core/intent_learning.py` —
     `verify(result, error)` execution verifier (ponytail heuristic: exception/None/False/blank = fail;
     per-intent verifiers later), `wilson_lower_bound()` confidence (0 trials → 0.0, small-sample-honest),

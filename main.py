@@ -58,6 +58,12 @@ def main():
     from core import skills
     skills.load(display)
 
+    # LLM fallback host — spawn llama-swap if enabled and nothing is already
+    # answering at config.LLM_BASE_URL. Threaded: the health probe must not
+    # delay startup; the fallback just stays unavailable until it's up.
+    from core import llm_host
+    threading.Thread(target=llm_host.ensure_running, daemon=True).start()
+
     listener.set_speaking_event(speaker.is_speaking)
 
     def on_reminder(message: str):

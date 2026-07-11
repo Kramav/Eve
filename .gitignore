@@ -49,3 +49,7 @@ desktop.ini
 
 # Claude Code personal settings
 .claude/settings.local.json
+
+# LLM fallback binaries + models (setup drops these; see llama-swap.yaml)
+bin/
+*.gguf

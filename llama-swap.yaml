@@ -1,0 +1,25 @@
+# llama-swap config for Eve's LLM fallback (config.py LLM_MODEL = "eve-fallback").
+#
+# llama-swap (https://github.com/mostlygeek/llama-swap) proxies OpenAI-style
+# requests and starts/stops llama.cpp's llama-server per model on demand —
+# `ttl` unloads the model after idle seconds, so it frees RAM/VRAM while you
+# game and reloads on the next fallback request.
+#
+# Setup:
+#   1. Install llama.cpp (winget install llama.cpp) — provides llama-server.
+#   2. Install llama-swap (GitHub releases) somewhere on PATH, or set
+#      EVE_LLAMA_SWAP to the exe. Eve auto-spawns it (core/llm_host.py).
+#   3. Drop a tool-capable GGUF into models/llm/ and fix the -m path below.
+#      CPU-friendly pick: Qwen3-4B-Instruct Q4_K_M (~2.5 GB).
+#
+# llama-server needs --jinja for OpenAI tool calling. ${PORT} is filled in by
+# llama-swap. The winget install doesn't shim onto PATH, so cmd uses the
+# absolute path — re-point it if you install llama.cpp elsewhere.
+
+models:
+  "eve-fallback":
+    cmd: |
+      C:\Users\krame\AppData\Local\Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe\llama-server.exe
+      --port ${PORT} --jinja -c 8192
+      -m models/llm/Qwen3-4B-Instruct-2507-Q4_K_M.gguf
+    ttl: 600

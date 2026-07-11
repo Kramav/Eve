@@ -876,9 +876,20 @@ def dispatch(text: str):
     if guess is not None:
         return guess
 
-    # Local LLM fallback (opt-in via config.FALLBACK_LLM = "ollama"). Returns
-    # None when off/unavailable, so we fall through to the plain reply.
+    # Learned tier (Dynamic Intent Learning) — phrasings the LLM fallback
+    # previously resolved and VERIFIED now execute locally, no LLM round-trip.
+    # Serves even when FALLBACK_LLM is off; a failed learned execution falls
+    # through to the LLM below.
     from commands import fallback
+    learned = fallback.learned_answer(text)
+    if learned is not None:
+        return learned
+
+    # Local LLM fallback (config.FALLBACK_LLM = "local", OpenAI-compatible —
+    # llama-swap/llama-server/Ollama). Returns None when off/unavailable, so we
+    # fall through to the plain reply. Verified successful tool calls are
+    # captured into learned_intents.json (the tier above) — the LLM is the
+    # teacher, verified execution is the lesson.
     llm = fallback.answer(text)
     if llm is not None:
         return llm

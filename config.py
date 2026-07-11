@@ -76,13 +76,27 @@ TTS_KOKORO_VOICE  = os.environ.get("EVE_KOKORO_VOICE", "af_heart")  # see kokoro
 BRAVE_API_KEY = os.environ.get("BRAVE_API_KEY", "")
 
 # LLM fallback — when nothing matches an intent and the fuzzy guess is too weak,
-# optionally answer with a local Ollama model instead of "Not recognized".
-#   "ollama" → POST to OLLAMA_HOST; "none" → keep the plain not-recognized reply.
-# Requires Ollama running locally (https://ollama.com) with the model pulled:
-#   ollama pull llama3
-FALLBACK_LLM   = os.environ.get("FALLBACK_LLM", "none")   # "ollama" | "none"
+# ask a local model instead of saying "Not recognized". Speaks the OpenAI
+# chat-completions protocol, so any local server works: llama-swap (default —
+# swaps llama.cpp models on demand, frees RAM when idle), a bare llama-server,
+# Ollama (point EVE_LLM_URL at http://localhost:11434/v1), LM Studio, …
+#   "local" → POST {LLM_BASE_URL}/chat/completions; "none" → plain not-recognized.
+# ("ollama" is accepted as a legacy alias for "local".)
+# Verified successful tool-calls feed Dynamic Intent Learning (learned_intents.json).
+FALLBACK_LLM = os.environ.get("FALLBACK_LLM", "local")    # "local" | "none"
+LLM_BASE_URL = os.environ.get("EVE_LLM_URL", "http://127.0.0.1:8080/v1")
+LLM_MODEL    = os.environ.get("EVE_LLM_MODEL", "eve-fallback")  # a llama-swap.yaml model name
+
+# llama-swap auto-spawn: if the fallback is on but nothing answers at
+# LLM_BASE_URL, main.py launches llama-swap with LLAMA_SWAP_CONFIG (and kills it
+# on exit). Leave EVE_LLAMA_SWAP empty to search PATH; set it to the exe path
+# otherwise. If you run llama-swap as a service yourself, Eve detects it and
+# skips the spawn.
+LLAMA_SWAP_EXE    = os.environ.get("EVE_LLAMA_SWAP", "")
+LLAMA_SWAP_CONFIG = str(Path(__file__).parent / "llama-swap.yaml")
+
+# Ollama host — still used by the optional "ollama" VISION backend below.
 OLLAMA_HOST    = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL   = os.environ.get("OLLAMA_MODEL", "llama3")
 
 # ── Visual Navigation skill — vision fallback (commands/vision.py) ────────────
 # When the accessibility tier (UI Automation) can't read a window's elements,

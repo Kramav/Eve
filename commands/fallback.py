@@ -1,5 +1,5 @@
 """Local LLM fallback with tool calling. When no built-in intent and no skill
-matches, a local Ollama model gets one shot at the utterance:
+matches, a local model gets one shot at the utterance:
 
   - If it's an *actionable* request the regex missed ("could you throw firefox
     on my left screen"), the model emits a tool call that maps to a real Eve
@@ -7,12 +7,18 @@ matches, a local Ollama model gets one shot at the utterance:
     what turns "not recognized" into "handled weird phrasing."
   - Otherwise it just answers in a sentence or two (general Q&A).
 
-Off by default (config.FALLBACK_LLM = "none"). Set it to "ollama" and run a
-local Ollama server with a **tool-capable** model pulled (llama3.1+, qwen3,
-mistral-nemo, …). Any failure — server down, model missing, no tool support,
-timeout — degrades gracefully: tool-calling falls back to plain answering, and
-plain answering falls back to None so dispatch() shows its normal reply. Nothing
-ever hangs or crashes the pipeline.
+Protocol: OpenAI chat-completions against config.LLM_BASE_URL — the one shape
+llama-swap, bare llama-server (--jinja), Ollama (/v1) and LM Studio all speak.
+Default target is llama-swap (config.LLM_MODEL names a llama-swap.yaml entry).
+Any failure — server down, model missing, no tool support, timeout — degrades
+gracefully: tool-calling falls back to plain answering, and plain answering
+falls back to None so dispatch() shows its normal reply. Nothing ever hangs or
+crashes the pipeline.
+
+Dynamic Intent Learning: every VERIFIED successful tool call is captured as a
+learned candidate (core/intent_learning.py → learned_intents.json), and
+`learned_answer()` serves repeat/similar phrasings locally so the LLM grows
+rare over time. Dispatch order: learned tier first, then the LLM.
 """
 import json
 import urllib.request
@@ -20,7 +26,7 @@ import urllib.error
 
 import config
 
-_TIMEOUT_S = 30  # tool round-trips on CPU can be slow on first token
+_TIMEOUT_S = 45  # covers llama-swap cold-loading the model + CPU first token
 
 _SYSTEM = (
     "You are Eve, a local Windows voice assistant. If the user is asking you to "
@@ -30,7 +36,7 @@ _SYSTEM = (
     "sentences — no markdown, no lists. Only call a tool when you are confident."
 )
 
-# ── Tool schemas (OpenAI/Ollama function-calling shape) ─────────────────────
+# ── Tool schemas (OpenAI function-calling shape) ─────────────────────────────
 
 def _fn(name, desc, props, required):
     return {"type": "function", "function": {
@@ -87,11 +93,16 @@ _TOOL_HANDLERS = {
 }
 
 
-# ── HTTP ────────────────────────────────────────────────────────────────────
+def _enabled() -> bool:
+    # "ollama" accepted as a legacy alias for "local"
+    return (config.FALLBACK_LLM or "none").lower() in ("local", "ollama")
 
-def _post(path: str, body: dict):
+
+# ── HTTP (OpenAI chat-completions) ───────────────────────────────────────────
+
+def _post(body: dict):
     req = urllib.request.Request(
-        f"{config.OLLAMA_HOST.rstrip('/')}{path}",
+        f"{config.LLM_BASE_URL.rstrip('/')}/chat/completions",
         data=json.dumps(body).encode(),
         headers={"Content-Type": "application/json"},
     )
@@ -102,69 +113,101 @@ def _post(path: str, body: dict):
         return None
 
 
-def _run_tool(call: dict):
-    fn = call.get("function") or {}
-    name = fn.get("name")
-    args = fn.get("arguments") or {}
+def _message(data):
+    """choices[0].message from a chat-completions response, or None."""
+    try:
+        return (data.get("choices") or [{}])[0].get("message") or None
+    except (AttributeError, IndexError, TypeError):
+        return None
+
+
+def _run_tool(name: str, args):
     if isinstance(args, str):
         try:
             args = json.loads(args)
         except ValueError:
             args = {}
+    if not isinstance(args, dict):
+        args = {}
     entry = _TOOL_HANDLERS.get(name)
     if not entry:
-        return None
+        return None, args
     handler, feature = entry
     if feature:
         from core import features
         if not features.get(feature):
-            return None
+            return None, args
     try:
-        return handler(args)
+        return handler(args), args
     except Exception:
-        return None
+        return None, args
 
 
 def _chat(text: str):
     """Tool-capable chat. Returns a handler result, a spoken answer, or None.
-    Falls back to plain generation if the chat/tools endpoint isn't usable."""
-    data = _post("/api/chat", {
-        "model": config.OLLAMA_MODEL,
+    Falls back to plain generation if the tools endpoint isn't usable.
+    Verified successful tool calls are captured as learned candidates."""
+    data = _post({
+        "model": config.LLM_MODEL,
         "messages": [{"role": "system", "content": _SYSTEM},
                      {"role": "user", "content": text}],
         "tools": _TOOLS,
-        "stream": False,
     })
     if data is None:
         return _plain(text)
-    msg = data.get("message") or {}
+    msg = _message(data)
+    if msg is None:
+        return _plain(text)
     calls = msg.get("tool_calls") or []
     if calls:
-        result = _run_tool(calls[0])
+        fn = (calls[0].get("function") or {})
+        result, args = _run_tool(fn.get("name"), fn.get("arguments") or {})
         if result is not None:
+            from core import intent_learning
+            if intent_learning.verify(result, None):
+                intent_learning.learned().capture(text, fn.get("name"), args)
             return result
     content = (msg.get("content") or "").strip()
     return content or None
 
 
 def _plain(text: str):
-    """General Q&A with no tools — the original behavior, kept as a floor for
-    models that don't support tool calling."""
-    data = _post("/api/generate", {
-        "model": config.OLLAMA_MODEL,
-        "prompt": text,
-        "system": "You are Eve. Answer in one or two short spoken sentences. "
-                  "No markdown, no lists.",
-        "stream": False,
+    """General Q&A with no tools — the floor for models/servers that don't
+    support tool calling."""
+    data = _post({
+        "model": config.LLM_MODEL,
+        "messages": [
+            {"role": "system", "content": "You are Eve. Answer in one or two "
+             "short spoken sentences. No markdown, no lists."},
+            {"role": "user", "content": text},
+        ],
     })
-    if data is None:
+    msg = _message(data) if data else None
+    if msg is None:
         return None
-    return (data.get("response") or "").strip() or None
+    return (msg.get("content") or "").strip() or None
+
+
+# ── Learned tier — serve captured mappings locally, before the LLM ──────────
+
+def learned_answer(text: str):
+    """Match `text` against learned_intents.json and execute the mapped tool.
+    Returns the handler result or None (no match / failed / gated). Works even
+    with FALLBACK_LLM off — learning persists when the teacher is away."""
+    from core import intent_learning
+    hit = intent_learning.learned().match(text)
+    if hit is None:
+        return None
+    entry, args = hit
+    result, _ = _run_tool(entry["tool"], args)
+    ok = intent_learning.verify(result, None)
+    intent_learning.learned().record(entry, ok)
+    return result if ok else None   # a failed learned exec falls through to the LLM
 
 
 def answer(text: str):
     """Entry point used by dispatch(). None when off/unavailable."""
-    if (config.FALLBACK_LLM or "none").lower() != "ollama":
+    if not _enabled():
         return None
     return _chat(text)
 
@@ -173,7 +216,6 @@ if __name__ == "__main__":
     # ponytail: no live server in CI — prove the off-switch short-circuits and
     # the tool registry is internally consistent. Run as a module so `import
     # config` resolves:  python -m commands.fallback
-
     config.FALLBACK_LLM = "none"
     assert answer("what is the capital of france") is None
     for tool in _TOOLS:
