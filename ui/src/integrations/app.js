@@ -8,6 +8,12 @@ let _setup = {}   // latest tool-readiness map from the backend
 //   kind: 'tool' → status pill + copyable install command + setup guide
 const SERVICES = [
   {
+    kind: 'llm', id: 'llm', title: 'Local LLM fallback (no key, no cloud)',
+    desc: "When no command matches, a local model interprets it — and Eve learns " +
+          "verified successes so the model is needed less over time. Runs entirely " +
+          "on this machine via llama.cpp + llama-swap. Idle models auto-unload.",
+  },
+  {
     kind: 'key', id: 'brave', title: 'Brave Search',
     desc: "Fallback web search when DuckDuckGo returns nothing. Free tier: 2,000 searches/month.",
     url: 'https://brave.com/search/api/',
@@ -53,7 +59,7 @@ const SERVICES = [
 
 function connect() {
   ws = new WebSocket(WS_URL)
-  ws.onopen    = () => send('integrations:get')
+  ws.onopen    = () => { send('integrations:get'); send('llm:get') }
   ws.onclose   = () => setTimeout(connect, 500)
   ws.onerror   = () => {}
   ws.onmessage = e => {
@@ -64,6 +70,12 @@ function connect() {
         applyState(msg.services || {})
         // Re-enable any Install button now that fresh status arrived.
         document.querySelectorAll('[data-install-btn]').forEach(b => { b.disabled = false })
+      } else if (msg.type === 'llm_intents_result') {
+        flash(msg.message, msg.ok ? 'ok' : 'error')
+      } else if (msg.type === 'llm_state') {
+        _llm = msg
+        applyLlmState()
+        if (_llmSaving) { _llmSaving = false; flash('LLM options saved.', 'ok') }
       } else if (msg.type === 'integrations_test_result') {
         flash(msg.message, msg.ok ? 'ok' : 'error')
       } else if (msg.type === 'integrations_install_result') {
@@ -102,6 +114,74 @@ function keyCard(s) {
     </div>`
 }
 
+// ── Local LLM options card — every knob user-editable, saved to settings.json
+let _llm = null          // latest llm_state from the backend
+let _llmSaving = false   // Apply in flight (so llm:get responses don't flash)
+
+const _LLM_FIELDS = [   // [key, label, input type]
+  ['enabled',         'Enable LLM fallback',                     'check'],
+  ['gpu',             'Use GPU for the main model',              'check'],
+  ['swap_when_busy',  'Small CPU model while gaming / RAM high', 'check'],
+  ['busy_ram_pct',    'Busy above RAM %',                        'num'],
+  ['main_model_file', 'Main model',                              'model'],
+  ['mini_model_file', 'Small model',                             'model'],
+  ['ctx_main',        'Main context (tokens)',                   'num'],
+  ['ctx_mini',        'Small context (tokens)',                  'num'],
+  ['ttl_main',        'Main idle unload (s)',                    'num'],
+  ['ttl_mini',        'Small idle unload (s)',                   'num'],
+  ['base_url',        'Server URL (any local OpenAI-style host)', 'text'],
+]
+
+function llmCard() {
+  return `
+    <div class="llm-grid">
+      ${_LLM_FIELDS.map(([key, label, type]) => `
+        <label class="llm-field llm-${type}">
+          <span>${esc(label)}</span>
+          ${type === 'check' ? `<input type="checkbox" data-llm="${key}">`
+          : type === 'model' ? `<select data-llm="${key}"></select>`
+          : `<input type="${type === 'num' ? 'number' : 'text'}" data-llm="${key}" spellcheck="false">`}
+        </label>`).join('')}
+    </div>
+    <div class="btn-row">
+      <button class="ghost-btn" data-llm-export title="Save your learned intents as a shareable file">Export intents</button>
+      <button class="ghost-btn" data-llm-import title="Load someone else's exported intents">Import intents</button>
+      <span class="spacer"></span>
+      <button class="save-btn" data-llm-apply>Apply</button>
+    </div>`
+}
+
+function applyLlmState() {
+  const card = document.querySelector('.card[data-service="llm"]')
+  if (!card || !_llm) return
+  const pill = card.querySelector('[data-status]')
+  const s = _llm.settings || {}
+  pill.textContent = !s.enabled ? 'Off'
+    : _llm.server_up ? 'Ready' : 'Starts on first use'
+  pill.classList.toggle('set', !!s.enabled)
+  card.querySelectorAll('[data-llm]').forEach(el => {
+    const key = el.dataset.llm
+    if (el.tagName === 'SELECT') {
+      const models = _llm.models || []
+      el.innerHTML = models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('')
+        || '<option value="">(no .gguf files in models/llm)</option>'
+      el.value = s[key] || ''
+    } else if (el.type === 'checkbox') el.checked = !!s[key]
+    else el.value = s[key] ?? ''
+  })
+}
+
+function readLlmForm(card) {
+  const out = {}
+  card.querySelectorAll('[data-llm]').forEach(el => {
+    const key = el.dataset.llm
+    out[key] = el.type === 'checkbox' ? el.checked
+             : el.type === 'number'   ? Number(el.value) || 0
+             : el.value.trim()
+  })
+  return out
+}
+
 function toolCard(s) {
   return `
     ${s.install ? `<div class="key-row">
@@ -125,7 +205,7 @@ function render() {
         <span class="card-status" data-status>…</span>
       </div>
       <p class="card-desc">${esc(s.desc)}</p>
-      ${s.kind === 'key' ? keyCard(s) : toolCard(s)}
+      ${s.kind === 'key' ? keyCard(s) : s.kind === 'llm' ? llmCard() : toolCard(s)}
     </div>`).join('')
 
   root.querySelectorAll('.card').forEach(card => {
@@ -134,7 +214,28 @@ function render() {
     const guide = card.querySelector('[data-guide]')
     if (guide) guide.onclick = e => { e.preventDefault(); window.eve.openExternal(svc.url || svc.guide) }
 
-    if (svc.kind === 'key') {
+    if (svc.kind === 'llm') {
+      card.querySelector('[data-llm-apply]').onclick = () => {
+        _llmSaving = true
+        flash('Applying… (restarts the model host)', 'busy')
+        send('llm:set', { settings: readLlmForm(card) })
+      }
+      card.querySelector('[data-llm-export]').onclick = () => {
+        flash('Exporting…', 'busy')
+        send('llm:export_intents')
+      }
+      card.querySelector('[data-llm-import]').onclick = () => {
+        if (!confirm(
+          'Import someone else\'s trained intents?\n\n' +
+          'Warning: imported intents can cause unexpected issues — phrases ' +
+          'may trigger actions you don\'t expect, or override how Eve ' +
+          'interprets similar commands. They are kept separate from your own ' +
+          'learned intents (imported_intents.json) and can be removed by ' +
+          'deleting that file.')) return
+        flash('Choose a file in the picker…', 'busy')
+        send('llm:import_intents')
+      }
+    } else if (svc.kind === 'key') {
       const input = card.querySelector('[data-key]')
       card.querySelector('[data-reveal]').onclick = () => {
         input.type = input.type === 'password' ? 'text' : 'password'
@@ -174,6 +275,7 @@ function applyState(services) {
   SERVICES.forEach(s => {
     const card = document.querySelector(`.card[data-service="${s.id}"]`)
     if (!card) return
+    if (s.kind === 'llm') { applyLlmState(); return }
     const pill = card.querySelector('[data-status]')
     if (s.kind === 'key') {
       const st = services[s.id] || { set: false, hint: '' }

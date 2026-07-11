@@ -115,3 +115,23 @@ html, body {
 .status-msg.ok    { color: var(--green); }
 .status-msg.error { color: var(--red); }
 .status-msg.busy  { color: var(--accent); }
+
+/* ── Local LLM options grid ─────────────────────────────────────────────── */
+.llm-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; margin: 10px 0 4px;
+}
+.llm-field {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 11px; color: var(--dim); min-width: 0;
+}
+.llm-field span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.llm-field input[type="number"], .llm-field input[type="text"], .llm-field select {
+  background: rgba(0,0,0,0.3); border: 1px solid var(--border); border-radius: 4px;
+  color: var(--text); font-size: 11px; padding: 4px 6px; min-width: 0;
+}
+.llm-field input[type="number"] { width: 72px; }
+.llm-field select { max-width: 200px; }
+.llm-field input:focus, .llm-field select:focus { border-color: rgba(74,158,255,0.45); outline: none; }
+.llm-field input[type="checkbox"] { accent-color: var(--accent); }
+.llm-text { grid-column: 1 / -1; }
+.llm-text input { flex: 1; }

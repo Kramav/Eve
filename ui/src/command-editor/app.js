@@ -32,6 +32,7 @@ document.querySelectorAll('.tab').forEach(btn => {
     document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b === btn))
     document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.dataset.tab === key))
     if (key === 'raw') loadRaw()
+    if (key === 'learned') learnedRefresh()
   })
 })
 
@@ -410,3 +411,76 @@ window.addEventListener('keydown', e => {
     else if (stores[tabKey]) save(tabKey)
   }
 })
+
+// ── Learned intents tab (auto-updating store; view + delete over WS) ────────
+// Data lives in learned_intents.json / imported_intents.json (both gitignored,
+// owned by core/intent_learning.py). Read-only here except delete — the list
+// grows by itself from verified LLM-fallback successes.
+const LEARNED_WS_URL = 'ws://127.0.0.1:7734'
+let _learnedWs = null
+
+function learnedConnect() {
+  _learnedWs = new WebSocket(LEARNED_WS_URL)
+  _learnedWs.onopen    = () => learnedRefresh()
+  _learnedWs.onclose   = () => setTimeout(learnedConnect, 1000)
+  _learnedWs.onerror   = () => {}
+  _learnedWs.onmessage = e => {
+    try {
+      const msg = JSON.parse(e.data)
+      if (msg.type === 'intents_list') renderLearned(msg)
+    } catch (_) {}
+  }
+}
+
+function learnedSend(action, data = {}) {
+  if (_learnedWs && _learnedWs.readyState === WebSocket.OPEN)
+    _learnedWs.send(JSON.stringify({ action, ...data }))
+}
+
+function learnedRefresh() { learnedSend('intents:list') }
+
+function renderLearned(msg) {
+  const root = document.getElementById('rows-learned')
+  const rows = [...(msg.imported || []), ...(msg.personal || [])]
+  root.innerHTML = ''
+  if (!rows.length) {
+    root.innerHTML = '<div class="learned-empty">Nothing learned yet — phrases Eve ' +
+      'resolves through the LLM fallback (and verifies worked) will appear here.</div>'
+    return
+  }
+  const escL = s => String(s).replace(/[&<>"]/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+  for (const r of rows) {
+    const row = document.createElement('div')
+    row.className = 'row learned-row'
+    const argstr = Object.entries(r.args || {})
+      .filter(([, v]) => v !== null && v !== '')
+      .map(([k, v]) => `${escL(k)}: ${escL(v)}`).join(', ')
+    const badges = [
+      r.store === 'imported' ? `<span class="lbadge imported" title="From ${escL(r.origin || 'an imported pack')}">imported</span>` : '',
+      r.generalizes ? '<span class="lbadge gen" title="Trusted — also matches the same phrasing with different targets">generalizes</span>'
+                    : '<span class="lbadge" title="Only this exact phrase">exact</span>',
+      r.destructive ? '<span class="lbadge danger" title="Destructive class — never auto-served">held</span>' : '',
+    ].join('')
+    row.innerHTML = `
+      <div class="learned-main">
+        <div class="learned-phrase">“${escL(r.phrase)}”</div>
+        <div class="learned-action">→ ${escL(r.tool)}(${argstr})</div>
+      </div>
+      <div class="learned-meta">${badges}
+        <span class="learned-ev" title="verified successes / failures — confidence">${r.s}✓ ${r.f}✗ · ${Math.round((r.confidence || 0) * 100)}%</span>
+      </div>`
+    const del = document.createElement('button')
+    del.className = 'del-btn'
+    del.title = 'Forget this mapping'
+    del.textContent = '✕'
+    del.addEventListener('click', () => {
+      learnedSend('intents:delete', { store: r.store, tool: r.tool, phrase: r.phrase })
+      setStatus('Forgotten.', 'ok')
+    })
+    row.appendChild(del)
+    root.appendChild(row)
+  }
+}
+
+learnedConnect()

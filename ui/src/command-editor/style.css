@@ -424,3 +424,19 @@ html, body {
   transition: border-color 0.15s, color 0.15s;
 }
 .reload-btn:hover { border-color: rgba(74, 158, 255, 0.3); color: var(--text); }
+
+/* ── Learned intents tab ─────────────────────────────────────────────────── */
+.learned-row { align-items: center; gap: 10px; }
+.learned-main { flex: 1; min-width: 0; }
+.learned-phrase { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.learned-action { font-size: 11px; color: var(--dim); font-family: Consolas, monospace; margin-top: 2px; }
+.learned-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.learned-ev { font-size: 10px; color: var(--dim); white-space: nowrap; }
+.lbadge {
+  font-size: 9px; letter-spacing: 0.5px; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 3px; border: 1px solid var(--border); color: var(--dim);
+}
+.lbadge.gen      { border-color: rgba(80,200,120,0.4); color: #6fcf97; }
+.lbadge.imported { border-color: rgba(74,158,255,0.4); color: #4a9eff; }
+.lbadge.danger   { border-color: rgba(255,80,80,0.4);  color: #ff7070; }
+.learned-empty { font-size: 11px; color: var(--dim); padding: 14px 4px; }

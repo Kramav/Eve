@@ -282,6 +282,40 @@ class Display:
                 'message': res.get('message', ''),
             }))
 
+        # ── Local LLM fallback options (settings.json "llm"; core/llm_host) ──
+        elif action == 'llm:get':
+            from core import llm_host
+            loop = asyncio.get_running_loop()
+            state = await loop.run_in_executor(None, self._llm_state)
+            await self._push_one(ws, json.dumps(state))
+        elif action == 'llm:set':
+            from core import llm_host
+            loop = asyncio.get_running_loop()
+
+            def _save_apply():
+                llm_host.save_settings(data.get('settings') or {})
+                llm_host.apply_settings()
+                return self._llm_state()
+            state = await loop.run_in_executor(None, _save_apply)
+            await self._push_one(ws, json.dumps(state))
+        elif action == 'intents:list':
+            await self._push_one(ws, json.dumps(self._intents_list()))
+        elif action == 'intents:delete':
+            from core import intent_learning
+            store = (intent_learning.imported() if data.get('store') == 'imported'
+                     else intent_learning.learned())
+            store.delete(str(data.get('tool', '')), str(data.get('phrase', '')))
+            await self._push_one(ws, json.dumps(self._intents_list()))
+        elif action == 'llm:export_intents':
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, self._export_intents)
+            await self._push_one(ws, json.dumps(res))
+        elif action == 'llm:import_intents':
+            # The UI shows the "unexpected issues" warning BEFORE sending this.
+            loop = asyncio.get_running_loop()
+            res = await loop.run_in_executor(None, self._import_intents)
+            await self._push_one(ws, json.dumps(res))
+
     def _broadcast(self):
         payload = self._snapshot()
         asyncio.run_coroutine_threadsafe(self._push_all(payload), self._loop)
@@ -463,6 +497,79 @@ class Display:
             ready, detail = False, 'not detected'
         out['ollama'] = {'ready': ready, 'detail': detail}
         return out
+
+    def _llm_state(self) -> dict:
+        """Everything the LLM options card needs: current merged settings,
+        the .gguf files available to pick from, and whether a server answers."""
+        from core import llm_host
+        s = llm_host.settings()
+        return {
+            'type':      'llm_state',
+            'settings':  s,
+            'models':    llm_host.list_model_files(),
+            'server_up': llm_host._server_up(s['base_url']),
+        }
+
+    def _intents_list(self) -> dict:
+        """Learned + imported mappings for the command-editor Learned tab,
+        with the derived bits the UI shows (confidence %, generalizes flag)."""
+        from core import intent_learning as il
+
+        def rows(store, name):
+            out = []
+            for e in store.entries:
+                conf = store.confidence(e)
+                out.append({
+                    'store':       name,
+                    'phrase':      e.get('phrase', ''),
+                    'tool':        e.get('tool', ''),
+                    'args':        e.get('args') or {},
+                    's':           e.get('s', 0),
+                    'f':           e.get('f', 0),
+                    'confidence':  round(conf, 2),
+                    'generalizes': bool(e.get('pattern')) and conf >= il.TRUST_CONFIDENCE,
+                    'destructive': e.get('tool') in il.DESTRUCTIVE_TOOLS,
+                    'origin':      e.get('origin', ''),
+                    'last_used':   e.get('last_used', ''),
+                })
+            return out
+        return {'type': 'intents_list',
+                'personal': rows(il.learned(), 'personal'),
+                'imported': rows(il.imported(), 'imported')}
+
+    def _export_intents(self) -> dict:
+        from datetime import date
+        from core import intent_learning
+        try:
+            path = str(Path.home() / "Desktop" /
+                       f"eve-intents-{date.today():%Y%m%d}.json")
+            n = intent_learning.export_intents(path)
+            return {'type': 'llm_intents_result', 'ok': True,
+                    'message': f"Exported {n} learned intents to {path}"}
+        except Exception as e:
+            return {'type': 'llm_intents_result', 'ok': False,
+                    'message': f"Export failed: {e}"}
+
+    def _import_intents(self) -> dict:
+        from core import intent_learning
+        try:
+            # Native file picker via tkinter (stdlib) — shell-agnostic, works
+            # identically under Electron and Tauri.
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)
+            path = filedialog.askopenfilename(
+                title="Import Eve intents pack",
+                filetypes=[("Eve intents export", "*.json"), ("All files", "*.*")])
+            root.destroy()
+            if not path:
+                return {'type': 'llm_intents_result', 'ok': True, 'message': "Import cancelled."}
+            added, updated, skipped = intent_learning.import_intents(path)
+            return {'type': 'llm_intents_result', 'ok': True,
+                    'message': f"Imported: {added} added, {updated} updated, {skipped} skipped."}
+        except Exception as e:
+            return {'type': 'llm_intents_result', 'ok': False,
+                    'message': f"Import failed: {e}"}
 
     def _test_api_key(self, service: str, key):
         """Validate a key for the given service. brave → web search; anthropic /

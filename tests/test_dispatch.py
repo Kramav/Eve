@@ -14,15 +14,19 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Hermetic: routing tests must never reach a live LLM host (FALLBACK_LLM now
-# defaults to "local" and a llama-swap may well be running on this machine),
-# nor the user's real learned_intents.json.
+# Hermetic: routing tests must never reach a live LLM host (the fallback now
+# defaults ON and a llama-swap may well be running on this machine), nor the
+# user's real learned_intents.json / settings.json llm options.
 import config
 import tempfile
 config.FALLBACK_LLM = "none"
-from core import intent_learning
+from core import intent_learning, llm_host
+llm_host.settings = lambda: {**llm_host.DEFAULTS, "enabled": False,
+                             "base_url": "http://127.0.0.1:1", "model": "x"}
 intent_learning._learned = intent_learning.LearnedStore(
     os.path.join(tempfile.mkdtemp(), "learned_intents.json"))
+intent_learning._imported = intent_learning.LearnedStore(
+    os.path.join(tempfile.mkdtemp(), "imported_intents.json"))
 
 from core import dispatcher as d
 from core import features, session as S

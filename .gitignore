@@ -53,3 +53,6 @@ desktop.ini
 # LLM fallback binaries + models (setup drops these; see llama-swap.yaml)
 bin/
 *.gguf
+llama-swap.yaml
+learned_intents.json
+imported_intents.json

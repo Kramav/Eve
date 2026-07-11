@@ -47,6 +47,24 @@ def test_plain_answer():
     assert out and ("4" in out or "four" in out.lower()), f"unexpected: {out!r}"
 
 
+def test_mini_model_answers():
+    """The busy-swap target (eve-fallback-mini) loads and answers — llama-swap
+    swaps it in place of the main model on demand."""
+    if not _UP:
+        return  # SKIP: no LLM host running
+    from core import llm_host
+    data = fallback._post({
+        "model": llm_host.settings()["model_mini"],
+        "messages": [{"role": "user", "content":
+                      "What is two plus two? Answer with just the number."}],
+        "max_tokens": 16,
+    })
+    msg = fallback._message(data)
+    assert msg, f"mini model gave no message: {data!r}"
+    out = (msg.get("content") or "").lower()
+    assert "4" in out or "four" in out, f"unexpected: {out!r}"
+
+
 def test_tool_call_emitted_for_actionable_phrase():
     if not _UP:
         return  # SKIP: no LLM host running

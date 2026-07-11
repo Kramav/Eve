@@ -562,13 +562,21 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
   engine rework above — Tier A is its prerequisite).* Eve learns from **verified successful** LLM-fallback
   interactions so the local engine becomes the primary path and LLM inference grows rare over time.
   - **Phases 1–3 (language track) — LANDED (2026-07-10): the learning loop is LIVE.**
-    - **Teacher (LLM fallback, rebuilt):** [commands/fallback.py](commands/fallback.py) now speaks the
-      OpenAI chat-completions protocol against `config.LLM_BASE_URL` — default target **llama-swap**
-      (auto-spawned by [core/llm_host.py](core/llm_host.py) from `bin/llama-swap.exe` +
-      [llama-swap.yaml](llama-swap.yaml); llama.cpp's llama-server underneath, Qwen3-4B-Instruct Q4_K_M
-      in `models/llm/`, `ttl: 600` frees RAM while gaming). Bare llama-server / Ollama `/v1` / LM Studio
-      all work via the same protocol. `FALLBACK_LLM` defaults **on** ("local"); server-down degrades
-      instantly to the old not-recognized reply.
+    - **Teacher (LLM fallback, rebuilt):** [commands/fallback.py](commands/fallback.py) speaks the
+      chat-completions wire format (127.0.0.1 only — fully local) — default target **llama-swap**
+      (llama.cpp's llama-server underneath), auto-spawned by [core/llm_host.py](core/llm_host.py).
+      Bare llama-server / Ollama `/v1` / LM Studio work via the same protocol. Defaults **on**;
+      server-down degrades instantly to the old not-recognized reply.
+    - **Options, not baked-in (2026-07-10):** every knob lives in settings.json `"llm"` —
+      gpu offload, busy-swap policy, model names/files, ctx, ttl (defaults: `llm_host.DEFAULTS`).
+      The machine-specific [llama-swap.yaml](llama-swap.yaml) is **generated** (gitignored) from the
+      committed [llama-swap.example.yaml](llama-swap.example.yaml) by discovering llama-server and the
+      models actually present; hand-edits are never overwritten.
+    - **GPU + game-aware model swap:** main model (Qwen3-4B Q4) runs `-ngl 99` (Vulkan — works on the
+      RX 6700 XT) for fast answers; while a game/protected app is foreground (`essential.should_defer()`,
+      the focus-policy signal) or RAM ≥ threshold, `fallback._model()` requests the **mini** CPU model
+      (Qwen2.5-1.5B Q4) instead — Eve never contends with the game for GPU/VRAM, and llama-swap's `ttl`
+      unloads idle models to give the RAM back. Live-verified on GPU: `tests/test_llm_live.py` 3/3.
     - **Capture:** a fallback tool call that VERIFIABLY succeeds (`intent_learning.verify`) is recorded
       to **`learned_intents.json`** (repo root, transferable) with phrase, tool, args, and an
       auto-templated pattern (arg values → named groups, only when every value appears verbatim and
@@ -583,9 +591,17 @@ _All P2 items done — see Completed table (LLM fallback via Ollama, Auto-snap o
     - **Verified:** `tests/test_fallback.py` (13 — templating, trust ladder, destructive gate, protocol
       parsing, capture hook) + `tests/test_llm_live.py` (live llama-swap smoke: model loads, plain answer,
       tool call emitted; skips when no host) + suite 16/16 green with a live server running.
+    - **Tiers + sharing (2026-07-11):** lookup order is builtins → **imported packs**
+      (`imported_intents.json` — someone else's trained intents) → **personal learned**
+      (`learned_intents.json`) → LLM. Both stores are gitignored (personal data never lands on GitHub);
+      sharing is explicit: Export (Integrations panel → dated pack on Desktop) / Import (warning dialog —
+      "can cause unexpected issues" — then file picker; packs validated, merged by evidence, provenance
+      stamped). All LLM options (GPU, busy-swap, models, ctx/ttl, URL) are user-editable in the same panel.
+      Learning-poisoning guard: `verify_for_learning()` — polite-failure replies never teach.
     - **Next:** confirmation flow so destructive mappings can serve; surface learned entries in the
       command-editor UI (visible/deletable = the auto-updating custom list); extend "why did you do that"
-      to learned mappings; registry unification (learned entries as runtime `Intent`s).
+      to learned mappings; registry unification (learned entries as runtime `Intent`s); T2 feedback
+      ("no / undo" blocks a learn).
   - **Phase 1 — DONE (2026-07-01): verified outcome tracking substrate.** `core/intent_learning.py` —
     `verify(result, error)` execution verifier (ponytail heuristic: exception/None/False/blank = fail;
     per-intent verifiers later), `wilson_lower_bound()` confidence (0 trials → 0.0, small-sample-honest),

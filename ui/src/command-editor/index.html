@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'">
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ws://127.0.0.1:7734">
   <title>Eve — Command Editor</title>
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="../titlebar.css">
@@ -25,6 +25,7 @@
     <button class="tab active" data-tab="commands">Commands</button>
     <button class="tab"        data-tab="apps">Apps</button>
     <button class="tab"        data-tab="aliases">Aliases</button>
+    <button class="tab"        data-tab="learned">Learned</button>
     <button class="tab"        data-tab="raw">Raw JSON</button>
   </nav>
 
@@ -72,6 +73,16 @@
       <div class="tab-hint">Add your own phrase for any built-in command.</div>
       <div class="rows" id="rows-aliases"></div>
       <button class="add-btn" data-add="aliases">+ Add alias</button>
+    </section>
+
+    <!-- ── Learned intents tab (auto-updating; view + delete) ─────────── -->
+    <section class="tab-pane" id="tab-learned" data-tab="learned">
+      <div class="tab-hint">Phrases Eve learned from verified successes — plus any imported packs.
+        This list updates itself; delete anything you don't want Eve to keep.
+        Export / import lives in the Integrations panel.</div>
+      <div class="rows" id="rows-learned">
+        <div class="learned-empty">Eve is running without the intent service (start Eve to see this list).</div>
+      </div>
     </section>
 
     <!-- ── Raw JSON tab ────────────────────────────────────────────────── -->

@@ -32,7 +32,11 @@ import time
 
 _STORE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                            "intent_training.json")
-_LEARNED_FILE = os.path.join(os.path.dirname(_STORE_FILE), "learned_intents.json")
+# Personal (learned locally) and imported (someone else's exported pack) live
+# in SEPARATE files, both gitignored — they never end up on GitHub. Sharing
+# happens only through the explicit export/import below.
+_LEARNED_FILE  = os.path.join(os.path.dirname(_STORE_FILE), "learned_intents.json")
+_IMPORTED_FILE = os.path.join(os.path.dirname(_STORE_FILE), "imported_intents.json")
 
 # Trust bar for pattern (generalizing) matches: wilson(3, 0) ≈ 0.44 clears it,
 # wilson(2, 0) ≈ 0.34 doesn't → three clean verified successes.
@@ -58,6 +62,36 @@ def verify(result, error) -> bool:
     if result is None or result is False:
         return False
     if isinstance(result, str) and not result.strip():
+        return False
+    return True
+
+
+# Polite-failure detector for LEARNING decisions. Handlers report soft
+# failures as spoken strings ("Unknown app: flurbo", "I couldn't find …"),
+# which verify() rightly treats as a delivered response — but a mapping must
+# never be LEARNED from one, or the learned tier would replay the apology
+# forever instead of letting the LLM retry. core.response.Verified (a str
+# subclass carrying a real side-effect check) always counts as success.
+_FAILURE_SHAPED = re.compile(
+    r"^(unknown\b|not recognized|no such\b|sorry\b"
+    r"|i +(couldn't|can't|cannot|don't|didn't|was unable)"
+    r"|couldn't\b|can't\b|cannot\b|failed\b|unable to\b)"
+    r"|isn't available|not available right now", re.IGNORECASE)
+
+
+def verify_for_learning(result, error) -> bool:
+    """verify(), plus: failure-shaped spoken strings don't count as success.
+    Used for capture and for learned-tier outcome recording — stricter than
+    the builtin outcome tracking, because learning acts on this signal."""
+    if not verify(result, error):
+        return False
+    try:
+        from core.response import Verified
+        if isinstance(result, Verified):
+            return True                    # side-effect-checked success
+    except ImportError:
+        pass
+    if isinstance(result, str) and _FAILURE_SHAPED.search(result.strip()):
         return False
     return True
 
@@ -281,14 +315,90 @@ class LearnedStore:
             entry["last_failure"] = entry["last_used"]
         self._save()
 
+    def delete(self, tool: str, phrase: str) -> bool:
+        """Remove a mapping (the command-editor Learned tab's delete)."""
+        entry = self._find(tool, phrase)
+        if entry is None:
+            return False
+        self.entries.remove(entry)
+        self._save()
+        return True
+
 
 _learned = None
+_imported = None
 
 
 def learned() -> LearnedStore:
-    """Singleton LearnedStore (lazy so tests can point _LEARNED_FILE elsewhere
-    by constructing their own)."""
+    """Singleton personal store (learned locally from verified LLM successes)."""
     global _learned
     if _learned is None:
         _learned = LearnedStore()
     return _learned
+
+
+def imported() -> LearnedStore:
+    """Singleton imported store (someone else's exported pack). Same matching
+    and trust rules as the personal store — entries arrive with the exporter's
+    evidence counts and keep earning/losing local evidence via record()."""
+    global _imported
+    if _imported is None:
+        _imported = LearnedStore(_IMPORTED_FILE)
+    return _imported
+
+
+# ── export / import (the only sanctioned way learned intents travel) ─────────
+
+_EXPORT_KIND = "eve-intents"
+_EXPORT_VERSION = 1
+
+
+def export_intents(path: str) -> int:
+    """Write the personal learned set as a shareable pack. Returns entry count."""
+    pack = {"kind": _EXPORT_KIND, "version": _EXPORT_VERSION,
+            "exported": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "entries": learned().entries}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(pack, f, indent=2)
+    return len(learned().entries)
+
+
+def import_intents(path: str):
+    """Merge a pack into the IMPORTED store (never the personal one).
+    Returns (added, updated, skipped). Raises ValueError on a malformed pack —
+    the caller shows the message. Duplicate (tool, phrase) keeps whichever
+    side has more evidence."""
+    with open(path, encoding="utf-8") as f:
+        pack = json.load(f)
+    if not isinstance(pack, dict) or pack.get("kind") != _EXPORT_KIND:
+        raise ValueError("Not an Eve intents export file.")
+    entries = pack.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError("Malformed intents pack: no entries list.")
+    store = imported()
+    added = updated = skipped = 0
+    for e in entries:
+        try:
+            if not (isinstance(e, dict) and e.get("phrase") and e.get("tool")
+                    and isinstance(e.get("args", {}), dict)):
+                raise ValueError
+            clean = {"phrase": normalize(str(e["phrase"])), "tool": str(e["tool"]),
+                     "args": e.get("args") or {},
+                     "pattern": e.get("pattern") if isinstance(e.get("pattern"), str) else None,
+                     "s": max(0, int(e.get("s", 0))), "f": max(0, int(e.get("f", 0))),
+                     "created": e.get("created", ""), "last_used": e.get("last_used", ""),
+                     "origin": os.path.basename(path)}
+        except (ValueError, TypeError):
+            skipped += 1
+            continue
+        existing = store._find(clean["tool"], clean["phrase"])
+        if existing is None:
+            store.entries.append(clean)
+            added += 1
+        elif clean["s"] + clean["f"] > existing.get("s", 0) + existing.get("f", 0):
+            existing.update(clean)
+            updated += 1
+        else:
+            skipped += 1
+    store._save()
+    return added, updated, skipped

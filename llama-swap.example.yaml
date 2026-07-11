@@ -1,0 +1,42 @@
+# Template for Eve's llama-swap config. DO NOT put machine paths here — Eve
+# generates the real llama-swap.yaml (gitignored) from this file on first run
+# (core/llm_host.py): it discovers llama-server, checks which models exist in
+# models/llm/, and fills in the options from settings.json "llm" section:
+#
+#   { "llm": { "gpu": true, "swap_when_busy": true, "busy_ram_pct": 80,
+#              "model": "eve-fallback", "model_mini": "eve-fallback-mini",
+#              "main_model_file": "...gguf", "mini_model_file": "...gguf",
+#              "ctx_main": 8192, "ctx_mini": 4096,
+#              "ttl_main": 600, "ttl_mini": 300 } }
+#
+# All keys optional; defaults in core/llm_host.py DEFAULTS — and everything is
+# editable live from the Integrations panel ("open api keys"). The generated
+# llama-swap.yaml starts with an "# eve:generated" marker line: while it's
+# there, panel changes regenerate the file; delete the marker line and your
+# hand-edits are never touched again.
+#
+# Model policy (fallback.py picks per request; llama-swap swaps automatically):
+#   eve-fallback      — main model, GPU-offloaded when "gpu": true ({{GPU_FLAGS}}).
+#   eve-fallback-mini — small CPU model used while a game/protected app runs or
+#                       RAM is tight ("swap_when_busy"), so Eve never contends
+#                       with the game for GPU/VRAM.
+# ttl = idle seconds before llama-swap unloads the model and frees RAM/VRAM.
+
+models:
+#if-main
+  "eve-fallback":
+    cmd: |
+      {{LLAMA_SERVER}}
+      --port ${PORT} --jinja -c {{CTX_MAIN}}
+      {{GPU_FLAGS}}
+      -m {{MAIN_MODEL}}
+    ttl: {{TTL_MAIN}}
+#endif
+#if-mini
+  "eve-fallback-mini":
+    cmd: |
+      {{LLAMA_SERVER}}
+      --port ${PORT} --jinja -c {{CTX_MINI}}
+      -m {{MINI_MODEL}}
+    ttl: {{TTL_MINI}}
+#endif
