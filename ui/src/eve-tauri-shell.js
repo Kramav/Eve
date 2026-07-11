@@ -120,6 +120,10 @@
       await win.setSize(S(L.dirW, L.dirH))
       await win.setPosition(P(L.dirX, L.dirY))
       await win.show()               // first show after focus:false → no activation
+      // moveTop: SW_SHOWNOACTIVATE alone leaves the new window BEHIND a
+      // foreground borderless-fullscreen game — pulse topmost (SWP_NOACTIVATE)
+      // to surface it above the game without taking focus.
+      await win.setAlwaysOnTop(true); await win.setAlwaysOnTop(false)
     })
   }
 

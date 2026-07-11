@@ -4,7 +4,13 @@
     "noise_scale": 0.8,
     "noise_w": 0.75
   },
-  "overlayDisplayId": 3804309905,
-  "overlayCorner": "bottom-left",
-  "ui_scale": 1.4
+  "overlayDisplayId": "\\\\.\\DISPLAY1",
+  "overlayCorner": "bottom-right",
+  "ui_scale": 1.4,
+  "windowState": {
+    "window-manager": {
+      "width": 1548,
+      "height": 743
+    }
+  }
 }

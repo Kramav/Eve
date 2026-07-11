@@ -521,6 +521,16 @@ class Display:
     # ── run_loop: launch Electron, block until it exits ─────────────────────
 
     def run_loop(self):
+        # Tauri migration: EVE_NO_ELECTRON=1 skips the Electron spawn so the
+        # Tauri shell can be run instead (cd eve-tauri && npm run tauri dev).
+        # Python core + WS server stay up until Ctrl-C.
+        if os.environ.get('EVE_NO_ELECTRON'):
+            try:
+                threading.Event().wait()
+            except KeyboardInterrupt:
+                pass
+            return
+
         ui_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'ui'))
 
         if sys.platform == 'win32':
