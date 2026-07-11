@@ -121,6 +121,7 @@ let _llmSaving = false   // Apply in flight (so llm:get responses don't flash)
 const _LLM_FIELDS = [   // [key, label, input type]
   ['enabled',         'Enable LLM fallback',                     'check'],
   ['gpu',             'Use GPU for the main model',              'check'],
+  ['preload',         'Preload model at startup (no first-use wait)', 'check'],
   ['swap_when_busy',  'Small CPU model while gaming / RAM high', 'check'],
   ['busy_ram_pct',    'Busy above RAM %',                        'num'],
   ['main_model_file', 'Main model',                              'model'],
@@ -143,6 +144,10 @@ function llmCard() {
           : `<input type="${type === 'num' ? 'number' : 'text'}" data-llm="${key}" spellcheck="false">`}
         </label>`).join('')}
     </div>
+    <div class="llm-tip">Tip: <b>Preload</b> + <b>Main idle unload</b> set to 0 keeps the model
+      warm — instant answers, always. Gaming is still protected: when a game launches the main
+      model is evicted from the GPU right away and the small CPU model takes over; when you quit,
+      the main model warms back up.</div>
     <div class="btn-row">
       <button class="ghost-btn" data-llm-export title="Save your learned intents as a shareable file">Export intents</button>
       <button class="ghost-btn" data-llm-import title="Load someone else's exported intents">Import intents</button>

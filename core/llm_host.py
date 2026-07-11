@@ -35,6 +35,8 @@ DEFAULTS = {
     "base_url":        None,     # None → config.LLM_BASE_URL
     "model":           None,     # None → config.LLM_MODEL
     "model_mini":      "eve-fallback-mini",
+    "preload":         False,    # load the main model at startup (no first-use
+                                 # wait; pair with ttl_main 0 to keep it loaded)
     "gpu":             True,     # offload the main model (Vulkan/CUDA -ngl 99)
     "swap_when_busy":  True,     # game/high-RAM → use model_mini on CPU
     "busy_ram_pct":    80,       # RAM load % that counts as busy
@@ -209,29 +211,119 @@ def _listen_addr(base_url: str) -> str:
     return f":{urlparse(base_url).port or 8080}"
 
 
+def _preload(s: dict, model: str = None):
+    """Warm a model with a 1-token request so the first real fallback answers
+    at inference speed instead of cold-load speed. Blocking — runs on the
+    ensure_running/watcher background threads, never the voice path."""
+    body = json.dumps({"model": model or s["model"],
+                       "messages": [{"role": "user", "content": "hi"}],
+                       "max_tokens": 1}).encode()
+    req = urllib.request.Request(
+        f"{s['base_url'].rstrip('/')}/chat/completions", data=body,
+        headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=180).read()
+    except Exception:
+        pass                        # warm-up is best-effort, never fatal
+
+
+def _swap_root(base_url: str) -> str:
+    """llama-swap's admin endpoints live at the server root, not under /v1."""
+    b = base_url.rstrip("/")
+    return b[:-3] if b.endswith("/v1") else b
+
+
+def _unload(base_url: str, model: str):
+    """Evict a model NOW (llama-swap POST /api/models/unload/:id) — frees its
+    VRAM/RAM immediately instead of waiting out the ttl. Idempotent."""
+    req = urllib.request.Request(
+        f"{_swap_root(base_url)}/api/models/unload/{model}", data=b"", method="POST")
+    try:
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception:
+        pass
+
+
 def ensure_running() -> bool:
     """Idempotent; called once from main.py. True if a server is (now) up."""
     global _proc
     s = settings()
     if not s["enabled"]:
         return False
-    if _server_up(s["base_url"]):
-        return True
-    exe = _find_llama_swap()
-    cfg = generate_config()
-    if not exe or not cfg:
-        return False
+    up = _server_up(s["base_url"])
+    if not up:
+        exe = _find_llama_swap()
+        cfg = generate_config()
+        if not exe or not cfg:
+            return False
+        try:
+            _proc = subprocess.Popen(
+                [exe, "--config", cfg, "--listen", _listen_addr(s["base_url"])],
+                cwd=os.path.dirname(cfg),
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            atexit.register(stop)
+        except OSError:
+            _proc = None
+            return False
+    if s["preload"]:
+        # Gaming at startup → warm the small CPU model instead, so the GPU
+        # stays the game's. Otherwise warm the main model.
+        _preload(s, s["model_mini"] if _game_foreground() else s["model"])
+    _start_game_watcher()
+    return True
+
+
+def _game_foreground() -> bool:
+    """A game/protected app owns the screen (same signal as busy-swap)."""
     try:
-        _proc = subprocess.Popen(
-            [exe, "--config", cfg, "--listen", _listen_addr(s["base_url"])],
-            cwd=os.path.dirname(cfg),
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
-        atexit.register(stop)
-        return True                 # models load lazily on first request
-    except OSError:
-        _proc = None
+        from core import essential
+        return essential.should_defer()
+    except Exception:
         return False
+
+
+# ── game-launch eviction watcher ─────────────────────────────────────────────
+# TTL alone would let a GPU model squat on VRAM for minutes into a game. This
+# watches the foreground and reacts to transitions:
+#   game starts → evict the main model NOW; if preload is on, warm the small
+#                 CPU model so in-game fallbacks answer without a cold load.
+#   game ends   → if preload is on, re-warm the main model.
+# ponytail: 15s foreground poll; a WinEventHook is the upgrade if polling shows.
+
+_watcher_started = False
+
+
+def _on_transition(game_now: bool, s: dict):
+    if game_now:
+        _unload(s["base_url"], s["model"])
+        if s["preload"]:
+            _preload(s, s["model_mini"])
+    elif s["preload"]:
+        _preload(s, s["model"])      # swapping main back in also evicts the mini
+
+
+def _start_game_watcher():
+    global _watcher_started
+    if _watcher_started:
+        return
+    _watcher_started = True
+    import threading
+
+    def loop():
+        import time
+        was = _game_foreground()
+        while True:
+            time.sleep(15)
+            try:
+                s = settings()
+                now = _game_foreground()
+                if now != was and s["enabled"] and s["swap_when_busy"]:
+                    _on_transition(now, s)
+                was = now
+            except Exception:
+                pass
+    threading.Thread(target=loop, daemon=True).start()
 
 
 def stop():

@@ -417,6 +417,64 @@ def test_apply_settings_respects_hand_edit_marker():
         llm_host.settings = old_settings
 
 
+def test_preload_option_warms_main_or_mini():
+    from core import llm_host
+    warmed = []
+    old = (llm_host.settings, llm_host._server_up, llm_host._preload,
+           llm_host._game_foreground, llm_host._start_game_watcher)
+    llm_host._server_up = lambda *a, **k: True
+    llm_host._preload = lambda s, model=None: warmed.append(model or s["model"])
+    llm_host._start_game_watcher = lambda: None
+    try:
+        # preload off (default) → no warm-up
+        llm_host.settings = lambda: _settings()
+        assert llm_host.ensure_running() is True and warmed == []
+        # preload on, desktop idle → warms the MAIN model
+        llm_host.settings = lambda: _settings(preload=True)
+        llm_host._game_foreground = lambda: False
+        assert llm_host.ensure_running() is True and warmed == ["eve-fallback"]
+        # gaming at startup → warms the SMALL model instead (GPU stays the game's)
+        warmed.clear()
+        llm_host._game_foreground = lambda: True
+        assert llm_host.ensure_running() is True and warmed == ["eve-fallback-mini"]
+    finally:
+        (llm_host.settings, llm_host._server_up, llm_host._preload,
+         llm_host._game_foreground, llm_host._start_game_watcher) = old
+
+
+def test_game_transition_evicts_and_swaps():
+    from core import llm_host
+    actions = []
+    old = (llm_host._unload, llm_host._preload)
+    llm_host._unload = lambda base, model: actions.append(("unload", model))
+    llm_host._preload = lambda s, model=None: actions.append(("warm", model or s["model"]))
+    try:
+        # game starts, preload on → evict main NOW + warm the small CPU model
+        llm_host._on_transition(True, _settings(preload=True))
+        assert actions == [("unload", "eve-fallback"), ("warm", "eve-fallback-mini")]
+        # game starts, preload off → just the eviction
+        actions.clear()
+        llm_host._on_transition(True, _settings(preload=False))
+        assert actions == [("unload", "eve-fallback")]
+        # game ends, preload on → main warms back up
+        actions.clear()
+        llm_host._on_transition(False, _settings(preload=True))
+        assert actions == [("warm", "eve-fallback")]
+        # game ends, preload off → nothing (lazy load on next use)
+        actions.clear()
+        llm_host._on_transition(False, _settings(preload=False))
+        assert actions == []
+    finally:
+        llm_host._unload, llm_host._preload = old
+
+
+def test_swap_root_strips_v1():
+    from core.llm_host import _swap_root
+    assert _swap_root("http://127.0.0.1:8080/v1") == "http://127.0.0.1:8080"
+    assert _swap_root("http://127.0.0.1:8080/v1/") == "http://127.0.0.1:8080"
+    assert _swap_root("http://127.0.0.1:9000") == "http://127.0.0.1:9000"
+
+
 def test_generate_config_discovers_and_substitutes():
     import tempfile
     from core import llm_host

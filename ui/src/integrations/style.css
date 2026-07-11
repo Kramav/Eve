@@ -135,3 +135,9 @@ html, body {
 .llm-field input[type="checkbox"] { accent-color: var(--accent); }
 .llm-text { grid-column: 1 / -1; }
 .llm-text input { flex: 1; }
+.llm-tip {
+  font-size: 10px; color: var(--dim); line-height: 1.5; margin: 8px 0 2px;
+  padding: 7px 9px; background: rgba(74,158,255,0.06);
+  border: 1px solid rgba(74,158,255,0.15); border-radius: 4px;
+}
+.llm-tip b { color: var(--accent); font-weight: 600; }
