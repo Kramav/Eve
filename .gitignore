@@ -56,3 +56,6 @@ bin/
 llama-swap.yaml
 learned_intents.json
 imported_intents.json
+
+# User-editable streaming search URLs (skills/platforms.py); {q} = query
+platform_searches.json

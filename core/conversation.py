@@ -99,13 +99,6 @@ class Handoff:
     target: str = "llm"
 
 
-_AWAIT_STATE = {
-    NeedConfirm:  State.AWAITING_CONFIRMATION,
-    NeedClarify:  State.AWAITING_CLARIFICATION,
-    NeedSlot:     State.AWAITING_SLOT,
-}
-
-
 # ── ConversationContext (docs §5.2). Lean in Phase 1; the slot/referent fields
 # are the documented shape, populated in later phases. ──────────────────────
 @dataclass
@@ -144,6 +137,33 @@ _EXTEND_ACKS = ["No problem.", "Take your time.", "Sure, standing by.",
                 "Okay, no rush.", "Whenever you're ready."]
 _CANCEL_ACKS = ["Okay, cancelled.", "Never mind then.", "Alright, dropping that."]
 
+# Yes/no for confirmations (was dispatcher._YES_RE/_NO_RE — now the engine owns it).
+_YES = re.compile(r"^(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|"
+                  r"confirm(ed)?|correct|that'?s right|right|affirmative)\b", re.I)
+_NO  = re.compile(r"^(no|nope|nah|don'?t|do not|wrong|negative)\b", re.I)
+
+
+def _match_option(text: str, options):
+    """Best (label, action) match for a clarification answer, or None. Exact /
+    substring first, then a fuzzy fallback so 'the upstairs one' matches
+    'upstairs'."""
+    for label, action in options:
+        lab = _norm(label)
+        if lab and (lab in text or text in lab):
+            return action
+    try:
+        from rapidfuzz import fuzz
+        best, score = None, 0
+        for label, action in options:
+            s = fuzz.token_set_ratio(text, _norm(label))
+            if s > score:
+                best, score = action, s
+        if score >= 80:
+            return best
+    except ImportError:
+        pass
+    return None
+
 
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip().lower()).rstrip(".!?,;: ")
@@ -167,10 +187,12 @@ class ConversationEngine:
     legacy multi-turn context open (pending_confirm / active converse) so the
     engine keeps the mic open to answer it without a wake word."""
 
-    def __init__(self, router: Callable[[str], Any],
+    def __init__(self, router: Callable[[str, bool], Any],
                  engaged_signal: Optional[Callable[[], bool]] = None, *,
-                 followup_ttl: float = 6.0, awaiting_ttl: float = 12.0,
+                 followup_ttl: float = 0.0, awaiting_ttl: float = 12.0,
                  extend_by: float = 20.0):
+        # router(text, followup) → response | Outcome. `followup` is True on
+        # no-wake turns so the router can gate the LLM fallback.
         self.router = router
         self.engaged_signal = engaged_signal or (lambda: False)
         self.followup_ttl = float(followup_ttl)
@@ -178,6 +200,11 @@ class ConversationEngine:
         self.extend_by = float(extend_by)
         self.state = State.IDLE
         self._deadline = 0.0
+        # Engine-owned pending resolution (Phase 2): the action(s) awaiting a
+        # yes/no or an option pick. Replaces the session.pending_confirm bridge
+        # for migrated features; resolved internally, never re-routed.
+        self._pending_confirm = None    # (action, on_no) | None
+        self._pending_options = None    # [(label, action), …] | None
 
     # ── public API ───────────────────────────────────────────────────────
     def engaged(self) -> bool:
@@ -193,6 +220,10 @@ class ConversationEngine:
 
     # ── turn handling ────────────────────────────────────────────────────
     def _user_turn(self, text: str) -> StepResult:
+        # A turn that arrives while already engaged is a no-wake FOLLOW-UP; the
+        # router gates the LLM fallback off for these so ambient speech / stray
+        # noise on the open mic can't trigger a chatty LLM loop.
+        followup = self.state is not State.IDLE
         norm = _norm(text)
         if not norm:                                   # empty transcript
             return StepResult(listen=self.engaged(), ttl=self._await_ttl())
@@ -208,20 +239,65 @@ class ConversationEngine:
                 self._extend()
                 return StepResult(say=_pick(_EXTEND_ACKS), listen=True,
                                   ttl=self.awaiting_ttl)
+            # A pending confirmation / clarification resolves against this turn.
+            resolved = self._resolve_pending(norm)
+            if resolved is not None:
+                return resolved
 
-        result = self.router(text)
+        result = self.router(text, followup)
         return self._apply(result)
 
+    def _resolve_pending(self, norm: str) -> Optional[StepResult]:
+        """Resolve a pending NeedConfirm / NeedClarify against `norm`. Returns a
+        StepResult, or None to let an unrelated utterance route as a new command
+        (clearing the pending, matching the old any-other-utterance behavior)."""
+        if self._pending_confirm is not None:
+            action, on_no = self._pending_confirm
+            if _YES.search(norm):
+                self._clear_pending()
+                return self._apply(action())
+            if _NO.search(norm):
+                self._clear_pending()
+                if on_no is not None:
+                    return self._apply(on_no())
+                self._end()
+                return StepResult(say="Okay.", listen=False)
+            self._clear_pending()           # unrelated → new command
+            return None
+        if self._pending_options is not None:
+            action = _match_option(norm, self._pending_options)
+            self._clear_pending()
+            if action is not None:
+                return self._apply(action())
+            return None                     # no option matched → new command
+        return None
+
     def _apply(self, result) -> StepResult:
-        # A migrated feature returned a structured Outcome.
-        if type(result) in _AWAIT_STATE:
-            self.state = _AWAIT_STATE[type(result)]
+        # A migrated feature returned a structured Outcome. The prompt is SPOKEN
+        # (docs audit #3 — prompts were previously Silent/unspoken) and the mic
+        # stays open so the answer needs no wake word.
+        if isinstance(result, NeedConfirm):
+            self._pending_confirm = (result.action, result.on_no)
+            self.state = State.AWAITING_CONFIRMATION
             self._touch(self.awaiting_ttl)
-            return StepResult(response=result, listen=True, ttl=self.awaiting_ttl)
+            return StepResult(say=result.prompt, listen=True, ttl=self.awaiting_ttl)
+        if isinstance(result, NeedClarify):
+            self._pending_options = list(result.options)
+            self.state = State.AWAITING_CLARIFICATION
+            self._touch(self.awaiting_ttl)
+            return StepResult(say=result.prompt, listen=True, ttl=self.awaiting_ttl)
+        if isinstance(result, NeedSlot):
+            # Slot resolution is Phase 5; Phase 2 just speaks the prompt + waits.
+            self.state = State.AWAITING_SLOT
+            self._touch(self.awaiting_ttl)
+            return StepResult(say=result.prompt, listen=True, ttl=self.awaiting_ttl)
         if isinstance(result, Failed):
+            # Recovery-menu matching is Phase 4; Phase 2 speaks the message + waits.
             self.state = State.RETRY_PENDING
             self._touch(self.awaiting_ttl)
-            return StepResult(response=result, listen=True, ttl=self.awaiting_ttl)
+            return StepResult(say=result.message, listen=True, ttl=self.awaiting_ttl)
+        if isinstance(result, Done):
+            result = result.message         # render/engage like a plain reply
 
         # Legacy bridge: dispatch may have set pending_confirm / an active
         # converse — keep the mic open so it's answered without a wake word.
@@ -246,6 +322,11 @@ class ConversationEngine:
     def _end(self):
         self.state = State.IDLE
         self._deadline = 0.0
+        self._clear_pending()
+
+    def _clear_pending(self):
+        self._pending_confirm = None
+        self._pending_options = None
 
     def _touch(self, ttl: float):
         self._deadline = time.monotonic() + ttl
@@ -263,13 +344,13 @@ if __name__ == "__main__":
     # ponytail: quick self-check without audio. Full coverage in
     # tests/test_conversation.py.
     seen = []
-    eng = ConversationEngine(router=lambda t: seen.append(t) or "Done",
+    eng = ConversationEngine(router=lambda t, f: seen.append((t, f)) or "Done",
                              followup_ttl=5, awaiting_ttl=10)
     r = eng.handle(UserTurn("what time is it"))
     assert r.response == "Done" and r.listen and r.ttl == 5      # grace window
-    assert eng.engaged()
+    assert eng.engaged() and seen == [("what time is it", False)]  # wake turn
     r = eng.handle(UserTurn("hold on"))                          # extension
-    assert r.say and r.listen and seen == ["what time is it"]    # not routed
+    assert r.say and r.listen and len(seen) == 1                 # not routed
     r = eng.handle(SilenceTimeout())
     assert not eng.engaged()                                     # back to idle
     print("ok")

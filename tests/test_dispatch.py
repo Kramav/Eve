@@ -504,6 +504,18 @@ def test_snap_dangling_zone_prompts():
     S.reset()
 
 
+def test_followup_gates_the_llm_fallback():
+    # An unmatched utterance: the wake turn (allow_fallback=True) gives the plain
+    # not-recognized reply; a follow-up (allow_fallback=False) returns None so
+    # the Conversation Engine ends instead of hitting the chatty LLM. (Suite runs
+    # hermetic with FALLBACK_LLM=none, so the wake path yields the plain string.)
+    S.reset()
+    gibberish = "florble the wizzbang quux"
+    assert d.dispatch(gibberish, allow_fallback=False) is None
+    assert d.dispatch(gibberish, allow_fallback=True) is not None
+    S.reset()
+
+
 # ── Zero-dependency runner ────────────────────────────────────────────────────
 
 if __name__ == "__main__":

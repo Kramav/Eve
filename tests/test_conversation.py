@@ -19,13 +19,15 @@ from core.response import Panel
 
 
 class _Router:
-    """Records calls and returns a scripted result."""
+    """Records (text, followup) calls and returns a scripted result."""
     def __init__(self, result="Done"):
-        self.calls = []
+        self.calls = []          # text only (back-compat with existing asserts)
+        self.followups = []      # the followup flag per call
         self.result = result
 
-    def __call__(self, text):
+    def __call__(self, text, followup=False):
         self.calls.append(text)
+        self.followups.append(followup)
         return self.result
 
 
@@ -61,6 +63,27 @@ def test_multi_turn_continuation_no_wake_word():
     step = eng.handle(UserTurn("actually turn it back on"))
     assert step.response == "Turned the TV back on."
     assert r.calls == ["turn off the tv", "actually turn it back on"]
+
+
+def test_wake_turn_allows_llm_followup_gates_it():
+    # The wake turn routes with followup=False (LLM allowed); the grace-window
+    # continuation routes with followup=True (LLM gated off).
+    eng, r = _engine("It's 3 PM.")
+    eng.handle(UserTurn("what time is it"))
+    r.result = "And the date."
+    eng.handle(UserTurn("what about the date"))
+    assert r.followups == [False, True]
+
+
+def test_unmatched_followup_ends_conversation():
+    # A follow-up that routes to nothing (router → None, mirroring a gated LLM)
+    # ends the conversation instead of re-opening the mic on noise.
+    eng, r = _engine("It's 3 PM.")
+    eng.handle(UserTurn("what time is it"))
+    assert eng.engaged()
+    r.result = None                       # gated follow-up, no match
+    step = eng.handle(UserTurn("some ambient noise"))
+    assert step.listen is False and eng.state is State.IDLE
 
 
 # ── legacy bridge: pending_confirm / converse answered without a wake word ───
@@ -121,23 +144,74 @@ def test_silence_timeout_returns_to_idle():
 
 # ── structured Outcomes (the forward contract) ───────────────────────────────
 
-def test_outcomes_set_awaiting_states():
-    for outcome, want in [
-        (NeedConfirm(action=lambda: "x", prompt="sure?"), State.AWAITING_CONFIRMATION),
-        (NeedClarify("which?", [("a", None), ("b", None)]),  State.AWAITING_CLARIFICATION),
-        (NeedSlot("minutes", "how long?"),                   State.AWAITING_SLOT),
-        (Failed("device unreachable", [("retry", None)]),    State.RETRY_PENDING),
+def test_outcomes_speak_prompt_and_set_awaiting_states():
+    for outcome, want, prompt in [
+        (NeedConfirm(action=lambda: "x", prompt="sure?"), State.AWAITING_CONFIRMATION, "sure?"),
+        (NeedClarify("which?", [("a", None)]),  State.AWAITING_CLARIFICATION, "which?"),
+        (NeedSlot("minutes", "how long?"),      State.AWAITING_SLOT,          "how long?"),
+        (Failed("device unreachable", [("retry", None)]), State.RETRY_PENDING, "device unreachable"),
     ]:
         eng, r = _engine(outcome)
         step = eng.handle(UserTurn("do the thing"))
-        assert step.response is outcome and step.listen and step.ttl == 12
-        assert eng.state is want
+        assert step.say == prompt and step.listen and step.ttl == 12   # prompt SPOKEN
+        assert step.response is None and eng.state is want
 
 
 def test_done_outcome_grace_window():
     eng, r = _engine(Done("okay"))
     step = eng.handle(UserTurn("do it"))
     assert step.listen and eng.state is State.FOLLOWUP_ACTIVE
+
+
+# ── engine owns confirmation / clarification resolution (Phase 2) ────────────
+
+def test_confirm_yes_runs_action():
+    ran = []
+    eng, r = _engine(NeedConfirm(action=lambda: ran.append(1) or "Closed chrome.",
+                                 prompt="Did you mean chrome?"))
+    step = eng.handle(UserTurn("close chrom"))
+    assert step.say == "Did you mean chrome?" and eng.state is State.AWAITING_CONFIRMATION
+    step = eng.handle(UserTurn("yes"))
+    assert ran == [1] and step.response == "Closed chrome."
+    assert eng.state is State.FOLLOWUP_ACTIVE           # action's reply → grace window
+
+
+def test_confirm_no_without_and_with_on_no():
+    ran = []
+    eng, r = _engine(NeedConfirm(action=lambda: ran.append(1), prompt="sure?"))
+    eng.handle(UserTurn("do it"))
+    step = eng.handle(UserTurn("no"))
+    assert ran == [] and step.listen is False and eng.state is State.IDLE
+    eng2, r2 = _engine(NeedConfirm(action=lambda: "yes-branch", prompt="sure?",
+                                   on_no=lambda: "no-branch"))
+    eng2.handle(UserTurn("do it"))
+    step2 = eng2.handle(UserTurn("nope"))
+    assert step2.response == "no-branch"
+
+
+def test_confirm_unrelated_utterance_routes_as_new_command():
+    eng, r = _engine(NeedConfirm(action=lambda: "confirmed", prompt="sure?"))
+    eng.handle(UserTurn("do it"))
+    r.result = "New command ran."
+    step = eng.handle(UserTurn("what time is it"))
+    assert step.response == "New command ran." and r.calls[-1] == "what time is it"
+
+
+def test_clarify_option_match_and_no_match():
+    picked = []
+    opts = [("upstairs",   lambda: picked.append("up") or "Upstairs on."),
+            ("downstairs", lambda: picked.append("down") or "Downstairs on.")]
+    eng, r = _engine(NeedClarify("Upstairs or downstairs?", opts))
+    eng.handle(UserTurn("turn on the bedroom lights"))
+    assert eng.state is State.AWAITING_CLARIFICATION
+    step = eng.handle(UserTurn("the upstairs one"))          # fuzzy/substring match
+    assert picked == ["up"] and step.response == "Upstairs on."
+    # a non-matching utterance clears the options and routes as a new command
+    eng2, r2 = _engine(NeedClarify("which?", opts))
+    eng2.handle(UserTurn("lights"))
+    r2.result = "It's sunny."
+    step2 = eng2.handle(UserTurn("what's the weather"))
+    assert step2.response == "It's sunny."
 
 
 # ── panels / no-ops end the turn ─────────────────────────────────────────────

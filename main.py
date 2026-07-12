@@ -28,7 +28,9 @@ from core import features as _features
 from core import verify as _verify
 from core.conversation import (ConversationEngine as _Conversation,
                                UserTurn as _ConvUserTurn,
-                               SilenceTimeout as _ConvSilence)
+                               SilenceTimeout as _ConvSilence,
+                               Done as _ConvDone, NeedConfirm as _ConvNeedConfirm,
+                               NeedClarify as _ConvNeedClarify, Failed as _ConvFailed)
 import config
 from commands.reminders import start_checker
 
@@ -168,6 +170,25 @@ def main():
         if _features.get('tts'):
             speaker.speak(line)
 
+    def _legacy_outcome(result):
+        """Flag-off compatibility: a migrated feature may return an Outcome even
+        when the Conversation Engine is off. Convert it back to the legacy
+        pending_confirm + spoken prompt so the old single-turn path still works
+        (the wake-word-gated 'yes' is resolved by dispatch._handle_confirmation).
+        Prompts are now spoken — fixes the old Silent-not-spoken did-you-mean."""
+        if isinstance(result, _ConvDone):
+            return result.message
+        if isinstance(result, _ConvNeedConfirm):
+            _get_session().pending_confirm = (result.action, (), result.prompt)
+            return result.prompt
+        if isinstance(result, _ConvNeedClarify):
+            if len(result.options) == 1:
+                _get_session().pending_confirm = (result.options[0][1], (), result.prompt)
+            return result.prompt
+        if isinstance(result, _ConvFailed):
+            return result.message
+        return result
+
     # ── Conversation Engine (opt-in via features.json conversation_engine) ───
     # When on, Eve keeps the mic open after a reply so confirmations, follow-ups
     # and continuations need no wake word. See docs/CONVERSATION_ARCHITECTURE.md.
@@ -179,7 +200,9 @@ def main():
             s.converse is not None and s.converse.alive())
 
     _conv = _Conversation(
-        router=_dispatcher_mod.dispatch,
+        # Follow-up (no-wake) turns gate the LLM fallback off so ambient speech
+        # can't trigger a chatty loop; only wake-initiated turns reach the LLM.
+        router=lambda t, followup: _dispatcher_mod.dispatch(t, allow_fallback=not followup),
         engaged_signal=_engaged_signal,
         followup_ttl=config.CONV_FOLLOWUP_TTL,
         awaiting_ttl=config.CONV_AWAITING_TTL,
@@ -200,6 +223,10 @@ def main():
                 _, keep_visible = _present(response, verify_ok)
             if not step.listen:
                 break
+            # Show the orb actively listening during the no-wake follow-up window
+            # — otherwise it sits in idle and there's no sign the mic is open.
+            display.update(status="Listening...", color="listening")
+            display.set_mode("listening")
             audio = listener.listen_followup(step.ttl)
             if audio is None or getattr(audio, "size", 0) == 0:
                 _conv.handle(_ConvSilence())
@@ -237,7 +264,8 @@ def main():
             if _features.get('conversation_engine'):
                 keep_visible = _run_engine(text)
             else:
-                response, verify_ok = _resolve(_dispatcher_mod.dispatch(text))
+                response, verify_ok = _resolve(
+                    _legacy_outcome(_dispatcher_mod.dispatch(text)))
                 delay, keep_visible = _present(response, verify_ok)
 
         except Exception as e:

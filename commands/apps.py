@@ -328,19 +328,19 @@ def _suggest_running(name: str):
     return bases[hit[0]]                        # (choice, score, index) → choice
 
 
-def _not_running(name: str, action) -> str:
+def _not_running(name: str, action):
     """Response when `name` isn't running: offer the closest running process as
-    a 'did you mean X?' (a spoken yes re-runs `action` on it), or say so plainly.
-    Skips the suggestion if it just resolves back to the same name."""
+    a 'did you mean X?' confirmation (a spoken yes re-runs `action` on it), or
+    say so plainly. Skips the suggestion if it just resolves to the same name.
+
+    Returns a `NeedConfirm` Outcome — the Conversation Engine speaks it and lets
+    a bare 'yes' answer it; the legacy path (main._legacy_outcome) converts it
+    back to a pending_confirm + spoken prompt, so it works either way."""
     sug = _suggest_running(name)
     if sug and sug.lower() != name.lower():
-        try:
-            from core.session import get
-            verb = "close" if action is close_app else "kill"
-            get().pending_confirm = (action, (sug,), f"{verb} {sug}")
-            return f"I don't see {name} running. Did you mean {sug}?"
-        except Exception:
-            pass
+        from core.conversation import NeedConfirm
+        return NeedConfirm(action=lambda: action(sug),
+                           prompt=f"I don't see {name} running. Did you mean {sug}?")
     return f"{name} isn't running."
 
 

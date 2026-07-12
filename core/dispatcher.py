@@ -657,10 +657,11 @@ def _guess_dispatch(text: str):
     if score >= intent_match.HIGH_THRESHOLD and strict >= intent_match.STRICT_THRESHOLD:
         return fn(*args)
 
-    # Medium confidence → store and ask. Next utterance handles yes/no.
-    sess = _sess_mod.get()
-    sess.pending_confirm = (fn, args, canonical)
-    return Silent(f"Did you mean: {canonical}?")
+    # Medium confidence → ask. Returns a NeedConfirm the Conversation Engine
+    # speaks + answers hands-free; the legacy path (main._legacy_outcome) maps
+    # it back to a pending_confirm + spoken prompt.
+    from core.conversation import NeedConfirm
+    return NeedConfirm(action=lambda: fn(*args), prompt=f"Did you mean: {canonical}?")
 
 
 def _is_unknown_app(result) -> bool:
@@ -787,7 +788,12 @@ def explain_last() -> str:
     return _registry().explain_str(_LAST_TEXT)
 
 
-def dispatch(text: str):
+def dispatch(text: str, allow_fallback: bool = True):
+    """Route `text` to a handler. `allow_fallback` gates the LLM fallback: it's
+    False on Conversation-Engine follow-up turns (no-wake-word captures), so
+    ambient speech and questions not addressed to Eve don't get answered by the
+    chatty LLM — an unmatched follow-up returns None and the conversation ends,
+    instead of turning Eve into a runaway chatbot on an open mic."""
     text = text.strip().lower()
     text = re.sub(r"[.,!?]+$", "", text).strip()  # strip trailing punctuation Whisper adds
 
@@ -884,6 +890,12 @@ def dispatch(text: str):
     learned = fallback.learned_answer(text)
     if learned is not None:
         return learned
+
+    # Follow-up (no-wake) turns stop here: don't invoke the chatty LLM on
+    # ambient speech, and return None so the engine ends the conversation
+    # instead of re-opening the mic on noise.
+    if not allow_fallback:
+        return None
 
     # Local LLM fallback (config.FALLBACK_LLM = "local", OpenAI-compatible —
     # llama-swap/llama-server/Ollama). Returns None when off/unavailable, so we

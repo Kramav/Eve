@@ -122,9 +122,14 @@ OPENAI_API_KEY      = os.environ.get("OPENAI_API_KEY", "")
 # Windows Eve keeps the mic open (no wake word) after a reply. See
 # docs/CONVERSATION_ARCHITECTURE.md.
 #   FOLLOWUP_TTL — grace window after a normal reply (a natural continuation).
+#     DEFAULT 0 (OFF): Eve keeps the mic open only when it actually asked a
+#     question (confirmation/clarification/slot) or a feature claimed a converse
+#     — NOT after every reply. A blanket open mic caught ambient speech and
+#     fed it to the LLM (runaway chatbot); re-enable per-taste once VAD /
+#     "addressed to Eve" detection lands. Set e.g. EVE_CONV_FOLLOWUP_TTL=6 to try it.
 #   AWAITING_TTL — window while waiting for a confirmation / clarification / slot.
 #   EXTEND_BY    — added when the user says "hold on" / "one moment".
-CONV_FOLLOWUP_TTL = float(os.environ.get("EVE_CONV_FOLLOWUP_TTL", "6"))
+CONV_FOLLOWUP_TTL = float(os.environ.get("EVE_CONV_FOLLOWUP_TTL", "0"))
 CONV_AWAITING_TTL = float(os.environ.get("EVE_CONV_AWAITING_TTL", "12"))
 CONV_EXTEND_BY    = float(os.environ.get("EVE_CONV_EXTEND_BY", "20"))
 

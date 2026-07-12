@@ -57,11 +57,12 @@ def setup(display=None) -> None:
 # ── converse plumbing ─────────────────────────────────────────────────────────
 
 def _arm() -> None:
-    """(Re)claim upcoming utterances for the active YouTube session. Generous
-    budget so a long browse/playback session doesn't decay mid-use; explicit
-    close (or session reset) clears it."""
+    """(Re)claim upcoming utterances for the active YouTube session. Bounded so
+    the session can't hold an open mic indefinitely under the Conversation
+    Engine — each feed/playback command refreshes the window; it decays after
+    ~45s of no interaction (or an explicit close / session reset)."""
     _sess_mod.start_converse(_converse, label=f"youtube:{_state}",
-                             turns=999, ttl=3600.0)
+                             turns=20, ttl=45.0)
 
 
 def _end_session() -> None:
@@ -449,9 +450,20 @@ INTENTS = [
     (r"(?:open|show)\s+youtube\s+(?:home(?:page)?|in\s+(?:my|the)\s+browser)", browse_home_intent),
     # Default: the controllable HUD feed (numbered, voice-driven) — the whole
     # point of the YouTube feature. Catches "open youtube", "browse youtube",
-    # "help me browse youtube", "show me youtube", "open the youtube feed".
-    (r"(?:browse|open|launch|show)(?:\s+me)?\s+(?:the\s+)?(?:youtube|yt)(?:\s+feed)?\b|^youtube$", browse_feed_intent),
+    # "help me browse youtube", "show me youtube", "open the youtube feed",
+    # "turn/put/pull on/up youtube" (bare, no query → just open the feed).
+    (r"(?:browse|open|launch|show)(?:\s+me)?\s+(?:the\s+)?(?:youtube|yt)(?:\s+feed)?\b"
+     r"|^(?:turn|put|pull)\s+(?:on|up)\s+(?:youtube|yt)$|^youtube$", browse_feed_intent),
+    # Trailing platform marker: "<query> on youtube" (the natural "look up X on
+    # youtube" phrasing). The optional leading verb is stripped so the search is
+    # just the query. Explicit + unambiguous, so it beats web search (PREEMPT).
+    (r"^(?:(?:look up|search(?:\s+for)?|find|pull up|show me|get me|watch|play|browse)\s+)?"
+     r"(.+?)\s+on\s+(?:youtube|yt)$",                           play_or_search),
     (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",            play_or_search),
-    # \b prevents matching "play" inside "display", "watch" inside "watchful".
-    (r"\b(?:play|watch)\s+(.+)",                                 play_or_search),
+    # Anchored to the START of the (wake-stripped) command — only fires when the
+    # user LEADS with "play …"/"watch …" (optionally "can you play …"), so
+    # "play despacito" hits YouTube but "look up a guide to play spiderman" does
+    # NOT (that 'play' is buried mid-sentence). '^' also sidesteps "display".
+    (r"^(?:(?:can you|could you|please|just|go)\s+)*(?:play|watch)\s+(.+)",
+                                                                play_or_search),
 ]

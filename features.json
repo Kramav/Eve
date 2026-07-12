@@ -11,5 +11,5 @@
   "inapp_search": false,
   "mpv_youtube": false,
   "visual_nav": false,
-  "conversation_engine": false
+  "conversation_engine": true
 }
