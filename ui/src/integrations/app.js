@@ -122,7 +122,8 @@ const _LLM_FIELDS = [   // [key, label, input type]
   ['enabled',         'Enable LLM fallback',                     'check'],
   ['gpu',             'Use GPU for the main model',              'check'],
   ['preload',         'Preload model at startup (no first-use wait)', 'check'],
-  ['swap_when_busy',  'Small CPU model while gaming / RAM high', 'check'],
+  ['swap_when_busy',  'Use small model while gaming / RAM high',  'check'],
+  ['gpu_when_busy',   'Run small model on GPU during games (needs VRAM headroom)', 'check'],
   ['busy_ram_pct',    'Busy above RAM %',                        'num'],
   ['main_model_file', 'Main model',                              'model'],
   ['mini_model_file', 'Small model',                             'model'],
@@ -146,8 +147,9 @@ function llmCard() {
     </div>
     <div class="llm-tip">Tip: <b>Preload</b> + <b>Main idle unload</b> set to 0 keeps the model
       warm — instant answers, always. Gaming is still protected: when a game launches the main
-      model is evicted from the GPU right away and the small CPU model takes over; when you quit,
-      the main model warms back up.</div>
+      model is evicted from the GPU right away and the small model takes over (on CPU by default;
+      flip <b>Run small model on GPU during games</b> if your card has VRAM to spare — faster, but
+      can micro-stutter a maxed-out GPU). When you quit, the main model warms back up.</div>
     <div class="btn-row">
       <button class="ghost-btn" data-llm-export title="Save your learned intents as a shareable file">Export intents</button>
       <button class="ghost-btn" data-llm-import title="Load someone else's exported intents">Import intents</button>

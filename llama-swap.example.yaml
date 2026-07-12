@@ -40,3 +40,15 @@ models:
       -m {{MINI_MODEL}}
     ttl: {{TTL_MINI}}
 #endif
+#if-mini-gpu
+  # Same small model, GPU-offloaded — used during games only when
+  # "gpu_when_busy" is on and there's VRAM headroom (fast, low latency).
+  # llama-swap loads it on demand; costs nothing until requested.
+  "eve-fallback-mini-gpu":
+    cmd: |
+      {{LLAMA_SERVER}}
+      --port ${PORT} --jinja -c {{CTX_MINI}}
+      -ngl 99
+      -m {{MINI_MODEL}}
+    ttl: {{TTL_MINI}}
+#endif

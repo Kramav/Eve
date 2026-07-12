@@ -373,7 +373,82 @@ become `NeedClarify` producers. Examples:
 
 ---
 
-## 12. Feature integration contract
+## 12. LLM fallback & learning integration
+
+**Design decision (2026-07-12):** the LLM is a first-class conversational
+participant and a *repair brain*, and the engine **learns the data that flows
+through it — never the machine itself.**
+
+### 12.1 LLM fallback as a conversational participant (not a one-shot answerer)
+
+- Today `commands/fallback.py` is **stateless**: one utterance, no history,
+  answers once, conversation ends.
+- In the engine, an unroutable turn becomes `Handoff(llm, text)`. The engine
+  passes the **conversation context** to the LLM — pending intent, extracted
+  entities, missing slots, clarification history, recent prompts, referents.
+- The LLM returns a structured `Outcome` like any other handler — `Done`,
+  `NeedSlot`, `NeedClarify`, `Failed` — so it can **ask a follow-up and stay
+  engaged** instead of dead-ending.
+- This makes the LLM the **repair brain** for ASR errors and ambiguity: a
+  garbled/ambiguous utterance regex can't touch is often resolvable *because*
+  the LLM has the context.
+- DIL guardrails carry over: class-based safety (destructive actions always
+  confirm), verified-execution-only learning, and the focus invariant
+  (LLM/proactive speech is voice-only over a protected app).
+
+### 12.2 The engine learns DATA, never the machine — the firm boundary
+
+The state machine is the **fixed, testable skeleton**; what grows over time is
+the **data** flowing through it. This is the same line the intents engine
+already draws (registry logic fixed; learned intents are data), and that engine
+is the proof the line is right.
+
+**✅ Learned (data — safe, verified):**
+- **Intent mappings** — existing DIL, extended so captures made *mid-conversation*
+  also learn (phrase → tool + args, verified by execution).
+- **Slot / entity aliases** — spoken variants that fill a slot ("ten minutes" /
+  "for ten" → `duration=10`).
+- **Disambiguation preferences** — after the user picks "upstairs" for "bedroom
+  lights" N times, stop asking and default it (revocable, evidence-based — the
+  same Wilson-confidence model as learned intents).
+- **Referent / entity memory** that recurs across conversations.
+
+**❌ Never learned (the machine — unsafe, unpredictable):**
+- New states, transitions, or clarification *flows* invented by the LLM at runtime.
+- Any mutation of the HSM's control graph.
+
+*Rationale:* a self-modifying control-flow graph destroys the
+predictable/testable property the HSM was chosen for, and violates the DIL rule
+(act on verified data, never on an LLM interpretation alone). The machine stays
+fixed and unit-tested; intelligence accrues as data.
+
+### 12.3 Synergy — clarifications are labeled training data
+
+The engine produces *better* training signal than raw utterances do. When Eve
+asks "upstairs or downstairs?" and the user answers "upstairs," that is an
+explicit **labeled example** — far stronger than inferring intent from one noisy
+utterance.
+- Every resolved `NeedClarify` / `NeedConfirm` / `NeedSlot` is a training
+  example the learning loop can consume.
+- The engine makes learning cleaner; learning makes the engine ask fewer
+  questions over time.
+- The two systems reinforce each other — the main reason to build the learning
+  hooks into the engine from the start rather than bolt them on later.
+
+### 12.4 Where this plugs in
+
+- `Handoff` (§5.4) carries `context` to the LLM; `fallback.py` gains a
+  context-aware entry point alongside the current stateless one.
+- `intent_learning.LearnedStore` gains slot/preference stores parallel to the
+  intent store; the disambiguation resolver (§11) consults learned preferences
+  **before** asking.
+- All learned data stays user-visible/editable (the command-editor "Learned"
+  tab extends to slots/preferences) and gitignored/personal — consistent with
+  the existing DIL data policy.
+
+---
+
+## 13. Feature integration contract
 
 A feature **never** manages conversation state directly. It returns an
 `Outcome`; the engine does the rest. Examples:
@@ -416,7 +491,7 @@ scattered `pending_confirm` / `start_converse` / `Verified` wiring.
 
 ---
 
-## 13. Migration map (current → new home)
+## 14. Migration map (current → new home)
 
 | Current mechanism | New home |
 |-------------------|----------|
@@ -437,7 +512,7 @@ the active context frame rather than the global session.
 
 ---
 
-## 14. Module layout
+## 15. Module layout
 
 ```
 core/conversation.py     # ConversationEngine, ConversationContext, State,
@@ -458,7 +533,7 @@ it fully unit-testable without a microphone.
 
 ---
 
-## 15. Testing strategy
+## 16. Testing strategy
 
 `tests/test_conversation.py` (engine is pure → no audio needed). Cases:
 - clarification flow (ambiguous → choose → execute, no wake word between)
@@ -479,7 +554,7 @@ it fully unit-testable without a microphone.
 
 ---
 
-## 16. Rollout (phased, feature-flagged)
+## 17. Rollout (phased, feature-flagged)
 
 Gated behind `features.json` `conversation_engine` (default off until proven);
 the current path stays the default and runnable side-by-side.
@@ -492,13 +567,13 @@ the current path stays the default and runnable side-by-side.
 4. **Error recovery** — `Failed`/`RETRY_PENDING` for `Verified.on_fail`, LLM
    errors, the exception path.
 5. **Migrate `converse`/`Mode`/YouTube** and slot-filling.
-6. **Tests** (§15) comprehensive.
+6. **Tests** (§16) comprehensive.
 7. **Update this doc** to match the shipped API + a short "how to add a
    conversational feature" recipe.
 
 ---
 
-## 17. Risks & open questions
+## 18. Risks & open questions
 
 - **Blast radius:** rewrites the audio loop and every feature's return
   convention. Mitigation: feature flag, keep the old path, migrate incrementally.

@@ -35,10 +35,13 @@ DEFAULTS = {
     "base_url":        None,     # None → config.LLM_BASE_URL
     "model":           None,     # None → config.LLM_MODEL
     "model_mini":      "eve-fallback-mini",
+    "model_mini_gpu":  "eve-fallback-mini-gpu",
     "preload":         False,    # load the main model at startup (no first-use
                                  # wait; pair with ttl_main 0 to keep it loaded)
     "gpu":             True,     # offload the main model (Vulkan/CUDA -ngl 99)
-    "swap_when_busy":  True,     # game/high-RAM → use model_mini on CPU
+    "swap_when_busy":  True,     # game/high-RAM → use the small model
+    "gpu_when_busy":   False,    # during games run the small model on the GPU
+                                 # (fast, needs VRAM headroom) instead of CPU
     "busy_ram_pct":    80,       # RAM load % that counts as busy
     "main_model_file": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
     "mini_model_file": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
@@ -68,6 +71,12 @@ def settings() -> dict:
     if s["model"] is None:
         s["model"] = config.LLM_MODEL
     return s
+
+
+def busy_model(s: dict) -> str:
+    """The small model to use while a game/high-RAM app is foreground: the GPU
+    variant when the user opted in (VRAM headroom), else the CPU one."""
+    return s["model_mini_gpu"] if s.get("gpu_when_busy") else s["model_mini"]
 
 
 def _server_up(base_url: str, timeout: float = 1.5) -> bool:
@@ -134,11 +143,15 @@ def generate_config(path: str = None) -> str | None:
             .replace("{{CTX_MINI}}", str(s["ctx_mini"]))
             .replace("{{TTL_MAIN}}", str(s["ttl_main"]))
             .replace("{{TTL_MINI}}", str(s["ttl_mini"])))
-    # Drop the whole model block for a missing file (marker lines in the example).
+    # Drop the whole model block for a missing file (marker lines in the
+    # example). #if-mini-gpu is checked before #if-mini (substring) — both gate
+    # on the mini gguf being present.
     lines, skip = [], None
     for line in text.splitlines():
         if "#if-main" in line:
             skip = not main_gguf; continue
+        if "#if-mini-gpu" in line:
+            skip = not (mini_gguf and s["gpu_when_busy"]); continue
         if "#if-mini" in line:
             skip = not mini_gguf; continue
         if "#endif" in line:
@@ -267,9 +280,9 @@ def ensure_running() -> bool:
             _proc = None
             return False
     if s["preload"]:
-        # Gaming at startup → warm the small CPU model instead, so the GPU
-        # stays the game's. Otherwise warm the main model.
-        _preload(s, s["model_mini"] if _game_foreground() else s["model"])
+        # Gaming at startup → warm the small model (CPU, or GPU if opted in) so
+        # the main model doesn't grab the GPU the game needs. Else warm main.
+        _preload(s, busy_model(s) if _game_foreground() else s["model"])
     _start_game_watcher()
     return True
 
@@ -298,7 +311,7 @@ def _on_transition(game_now: bool, s: dict):
     if game_now:
         _unload(s["base_url"], s["model"])
         if s["preload"]:
-            _preload(s, s["model_mini"])
+            _preload(s, busy_model(s))
     elif s["preload"]:
         _preload(s, s["model"])      # swapping main back in also evicts the mini
 

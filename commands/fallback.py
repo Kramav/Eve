@@ -141,7 +141,7 @@ def _model() -> str:
     from core import llm_host
     s = llm_host.settings()
     if s["swap_when_busy"] and _busy(s):
-        return s["model_mini"]
+        return llm_host.busy_model(s)     # small model on CPU, or GPU if opted in
     return s["model"]
 
 

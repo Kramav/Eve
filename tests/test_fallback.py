@@ -361,6 +361,10 @@ def test_model_swaps_to_mini_when_busy():
         llm_host.settings = lambda: _settings(swap_when_busy=False)
         essential.should_defer = lambda: True          # policy off → main model
         assert fallback._model() == "eve-fallback"
+        # gpu_when_busy → the small model runs on the GPU variant during games
+        llm_host.settings = lambda: _settings(gpu_when_busy=True)
+        fallback._ram_load_pct = lambda: 10
+        assert fallback._model() == "eve-fallback-mini-gpu"
     finally:
         llm_host.settings, essential.should_defer, fallback._ram_load_pct = \
             old_settings, old_defer, old_ram
@@ -452,6 +456,10 @@ def test_game_transition_evicts_and_swaps():
         # game starts, preload on → evict main NOW + warm the small CPU model
         llm_host._on_transition(True, _settings(preload=True))
         assert actions == [("unload", "eve-fallback"), ("warm", "eve-fallback-mini")]
+        # game starts, preload on, gpu_when_busy → warm the GPU small variant
+        actions.clear()
+        llm_host._on_transition(True, _settings(preload=True, gpu_when_busy=True))
+        assert actions == [("unload", "eve-fallback"), ("warm", "eve-fallback-mini-gpu")]
         # game starts, preload off → just the eviction
         actions.clear()
         llm_host._on_transition(True, _settings(preload=False))
@@ -495,11 +503,19 @@ def test_generate_config_discovers_and_substitutes():
             f.write("user edited")
         assert llm_host.generate_config(out) == out
         assert open(out, encoding="utf-8").read() == "user edited"
-        # gpu off → no -ngl anywhere
+        # default (gpu_when_busy off) → no mini-gpu model block
+        assert "eve-fallback-mini-gpu" not in text
+        # gpu off + gpu_when_busy off → no -ngl anywhere
         out2 = os.path.join(tempfile.mkdtemp(), "llama-swap.yaml")
         llm_host.settings = lambda: _settings(gpu=False)
         llm_host.generate_config(out2)
         assert "-ngl" not in open(out2, encoding="utf-8").read()
+        # gpu_when_busy on → the GPU small-model block appears (with -ngl)
+        out3 = os.path.join(tempfile.mkdtemp(), "llama-swap.yaml")
+        llm_host.settings = lambda: _settings(gpu=False, gpu_when_busy=True)
+        llm_host.generate_config(out3)
+        t3 = open(out3, encoding="utf-8").read()
+        assert "eve-fallback-mini-gpu" in t3 and "-ngl 99" in t3
     finally:
         llm_host.find_llama_server, llm_host.settings = old_find, old_settings
 
