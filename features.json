@@ -10,5 +10,6 @@
   "verify_commands": true,
   "inapp_search": false,
   "mpv_youtube": false,
-  "visual_nav": false
+  "visual_nav": false,
+  "conversation_engine": false
 }

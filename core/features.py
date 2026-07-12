@@ -19,6 +19,8 @@ DEFAULTS = {
     'inapp_search': False,   # off → search falls back to opening Firefox
     'mpv_youtube':  False,   # off → YouTube uses the HUD feed instead of mpv
     'visual_nav':   False,   # hands-free mouse + element navigation (skills/visual_nav.py)
+    'conversation_engine': False,  # multi-turn Conversation Engine + no-wake follow-ups
+                                   # (docs/CONVERSATION_ARCHITECTURE.md); off → legacy per-turn path
 }
 
 # Experimental features, grouped separately in the UI.

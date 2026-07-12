@@ -26,7 +26,13 @@ from core.response import Silent, Panel, VideoList, SiteList, Verified
 from core.session import get as _get_session, Mode as _Mode
 from core import features as _features
 from core import verify as _verify
+from core.conversation import (ConversationEngine as _Conversation,
+                               UserTurn as _ConvUserTurn,
+                               SilenceTimeout as _ConvSilence)
+import config
 from commands.reminders import start_checker
+
+_CONV_MAX_TURNS = 15   # safety cap on follow-ups per wake (runaway guard)
 import commands.system as _sys_cmd
 import commands.tiling as _tiling_cmd
 import commands.window_manager as _wm_cmd
@@ -103,6 +109,112 @@ def main():
         display.show(status="Listening...", text="", color="listening")
         display.set_mode("listening")
 
+    # ── Response rendering (shared by the legacy path and the engine) ────────
+
+    def _resolve(response):
+        """Resolve a Verified response: speak the optimistic line up front, then
+        confirm the side effect (retry once, report honestly). Feature-gated.
+        Returns (response, verify_ok)."""
+        verify_ok = True
+        if isinstance(response, Verified):
+            if not _features.get('verify_commands'):
+                response = str(response)                # skip the check entirely
+            else:
+                if response.announce:
+                    display.update(status="Eve", text=response.announce,
+                                   color="processing")
+                    display.log("action", response.announce)
+                    if _features.get('tts'):
+                        speaker.speak(response.announce)
+                response, verify_ok = _verify.resolve(response)
+        print(f"Eve: {response}")
+        return response, verify_ok
+
+    def _present(response, verify_ok):
+        """Render a resolved response to the HUD (+ TTS). Returns
+        (delay, keep_visible) for the post-command hide timing."""
+        # Panel actions already happened via the Display; hide fast, don't
+        # speak. Must be checked before Silent (Panel subclasses it).
+        if isinstance(response, Panel):
+            return 0, False
+        if isinstance(response, Silent):
+            display.show(status=str(response), text="", color="error")
+            display.log("error", str(response))
+            display.set_mode("idle")
+            return 1.5, False
+        if isinstance(response, (VideoList, SiteList)):
+            links = ([item.get('url') for item in response.items]
+                     if isinstance(response, SiteList) else None)
+            display.show_list(response.format_items(), status=str(response), links=links)
+            display.log("action", str(response))
+            display.set_mode("playing")
+            return 0, True
+        if _get_session().mode == _Mode.PLAYING:
+            display.set_mode("playing")
+        else:
+            display.set_mode("idle")
+        if response:
+            color = "processing" if verify_ok else "error"
+            display.update(status="Eve", text=response, color=color)
+            display.log("action" if verify_ok else "error", response)
+            if _features.get('tts'):
+                speaker.speak(response)
+        return 2, False
+
+    def _say(line):
+        """Speak an engine-owned line (an ack or a cancel)."""
+        display.update(status="Eve", text=line, color="processing")
+        display.log("action", line)
+        if _features.get('tts'):
+            speaker.speak(line)
+
+    # ── Conversation Engine (opt-in via features.json conversation_engine) ───
+    # When on, Eve keeps the mic open after a reply so confirmations, follow-ups
+    # and continuations need no wake word. See docs/CONVERSATION_ARCHITECTURE.md.
+
+    def _engaged_signal():
+        # The legacy multi-turn signals the engine bridges in Phase 1.
+        s = _get_session()
+        return s.pending_confirm is not None or (
+            s.converse is not None and s.converse.alive())
+
+    _conv = _Conversation(
+        router=_dispatcher_mod.dispatch,
+        engaged_signal=_engaged_signal,
+        followup_ttl=config.CONV_FOLLOWUP_TTL,
+        awaiting_ttl=config.CONV_AWAITING_TTL,
+        extend_by=config.CONV_EXTEND_BY,
+    )
+
+    def _run_engine(first_text):
+        """Drive the engine's turn loop, opening no-wake follow-up windows until
+        the conversation ends or times out. Returns keep_visible."""
+        keep_visible = False
+        text = first_text
+        for _ in range(_CONV_MAX_TURNS):
+            step = _conv.handle(_ConvUserTurn(text))
+            if step.say is not None:
+                _say(step.say)
+            else:
+                response, verify_ok = _resolve(step.response)
+                _, keep_visible = _present(response, verify_ok)
+            if not step.listen:
+                break
+            audio = listener.listen_followup(step.ttl)
+            if audio is None or getattr(audio, "size", 0) == 0:
+                _conv.handle(_ConvSilence())
+                break
+            text = transcriber.transcribe(audio)
+            if not text:
+                _conv.handle(_ConvSilence())
+                break
+            text = re.sub(r"[.,!?]+$", "", text.strip())
+            print(f"Heard (follow-up): {text}")
+            display.update(status="Listening...", text=f'"{text}"', color="processing")
+            display.set_mode("processing")
+            display.log("heard", text)
+        return keep_visible
+
     def on_command(audio):
         delay        = 2
         keep_visible = False
@@ -122,67 +234,11 @@ def main():
             display.update(text=f'"{text}"')
             display.log("heard", text)
 
-            response = _dispatcher_mod.dispatch(text)
-
-            # Post-execution verification: a handler may return a Verified
-            # response that knows how to confirm its own side effect. Speak the
-            # optimistic line up front (esp. the "this may take a moment" note
-            # for apps learned to be slow), then check — retrying once and
-            # reporting honestly if it never took. Feature-gated so the extra
-            # check latency is opt-out.
-            verify_ok = True
-            if isinstance(response, Verified):
-                if not _features.get('verify_commands'):
-                    response = str(response)            # skip the check entirely
-                else:
-                    if response.announce:
-                        display.update(status="Eve", text=response.announce,
-                                       color="processing")
-                        display.log("action", response.announce)
-                        if _features.get('tts'):
-                            speaker.speak(response.announce)
-                    response, verify_ok = _verify.resolve(response)
-
-            print(f"Eve: {response}")
-
-            # Panel actions (open/close/toggle a managed Electron window) are
-            # already done by the handler via the Display; hide the HUD fast and
-            # don't speak. Must be checked before Silent (Panel subclasses it).
-            if isinstance(response, Panel):
-                delay = 0
-                return
-
-            if isinstance(response, Silent):
-                display.show(status=str(response), text="", color="error")
-                display.log("error", str(response))
-                display.set_mode("idle")
-                delay = 1.5
-                return
-
-            if isinstance(response, (VideoList, SiteList)):
-                # Site results carry URLs so the overlay rows can be clicked
-                # open in the browser; video rows stay voice-select only.
-                links = ([item.get('url') for item in response.items]
-                         if isinstance(response, SiteList) else None)
-                display.show_list(response.format_items(), status=str(response), links=links)
-                display.log("action", str(response))
-                display.set_mode("playing")
-                keep_visible = True
-                delay = 0
-                return
-
-            # Check if a video was just selected (session entered PLAYING)
-            if _get_session().mode == _Mode.PLAYING:
-                display.set_mode("playing")
+            if _features.get('conversation_engine'):
+                keep_visible = _run_engine(text)
             else:
-                display.set_mode("idle")
-
-            if response:
-                color = "processing" if verify_ok else "error"
-                display.update(status="Eve", text=response, color=color)
-                display.log("action" if verify_ok else "error", response)
-                if _features.get('tts'):
-                    speaker.speak(response)
+                response, verify_ok = _resolve(_dispatcher_mod.dispatch(text))
+                delay, keep_visible = _present(response, verify_ok)
 
         except Exception as e:
             print(f"Command error: {e}")

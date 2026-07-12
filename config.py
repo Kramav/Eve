@@ -118,4 +118,14 @@ OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "moondream")
 ANTHROPIC_API_KEY   = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY      = os.environ.get("OPENAI_API_KEY", "")
 
+# ── Conversation Engine (opt-in via features.json `conversation_engine`) ──────
+# Windows Eve keeps the mic open (no wake word) after a reply. See
+# docs/CONVERSATION_ARCHITECTURE.md.
+#   FOLLOWUP_TTL — grace window after a normal reply (a natural continuation).
+#   AWAITING_TTL — window while waiting for a confirmation / clarification / slot.
+#   EXTEND_BY    — added when the user says "hold on" / "one moment".
+CONV_FOLLOWUP_TTL = float(os.environ.get("EVE_CONV_FOLLOWUP_TTL", "6"))
+CONV_AWAITING_TTL = float(os.environ.get("EVE_CONV_AWAITING_TTL", "12"))
+CONV_EXTEND_BY    = float(os.environ.get("EVE_CONV_EXTEND_BY", "20"))
+
 # Custom commands are managed via editor.py — no need to edit here.

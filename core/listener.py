@@ -97,6 +97,55 @@ class Listener:
             if self._model.predict(chunk).get(self._wake_word, 0) > 0.5:
                 return
 
+    def listen_followup(self, ttl: float) -> np.ndarray | None:
+        """Open the mic for up to `ttl` seconds WITHOUT waiting for the wake
+        word (the Conversation Engine's follow-up window). Returns the recorded
+        audio once the user speaks and stops, or None if no speech starts within
+        the window. Same silence/echo gating as _record_command: chunks captured
+        while Eve's TTS is playing or during the post-response cooldown don't
+        count against the window, so Eve never hears itself."""
+        self._drain()
+        silence_limit = int(SILENCE_DURATION_S * SAMPLE_RATE / CHUNK_SIZE)
+        frames: list = []
+        started = False
+        silence_count = 0
+        deadline = time.monotonic() + ttl
+
+        while len(frames) < self._MAX_RECORD_CHUNKS:
+            try:
+                chunk = self._q.get(timeout=0.2)
+            except queue.Empty:
+                if not started and time.monotonic() >= deadline:
+                    return None
+                continue
+
+            # Don't let Eve's own voice / the refractory window open or fill the
+            # follow-up; push the no-speech deadline out while gated.
+            if (self._is_speaking and self._is_speaking.is_set()) or \
+                    time.monotonic() < self._cooldown_until:
+                deadline = time.monotonic() + ttl
+                continue
+
+            if not started and time.monotonic() >= deadline:
+                return None
+
+            flat = chunk.flatten()
+            loud = np.abs(flat).mean() >= SILENCE_THRESHOLD
+            if not started:
+                if not loud:
+                    continue                    # still waiting for speech to begin
+                started = True                  # first speech chunk — start recording
+            frames.append(flat.astype(np.float32) / 32768.0)
+
+            if loud:
+                silence_count = 0
+            else:
+                silence_count += 1
+                if silence_count >= silence_limit:
+                    break
+
+        return np.concatenate(frames) if frames else None
+
     def _record_command(self) -> np.ndarray:
         silence_limit = int(SILENCE_DURATION_S * SAMPLE_RATE / CHUNK_SIZE)
         frames = []
