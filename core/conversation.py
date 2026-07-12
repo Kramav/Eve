@@ -143,10 +143,39 @@ _YES = re.compile(r"^(yes|yeah|yep|yup|sure|ok(ay)?|do it|please|go ahead|"
 _NO  = re.compile(r"^(no|nope|nah|don'?t|do not|wrong|negative)\b", re.I)
 
 
+def _menu(options) -> str:
+    """Spoken menu from recovery/clarify option labels: [(a),(b),(c)] →
+    'A, b, or c?'. Empty when there are no options (bare message)."""
+    labels = [str(label) for label, _ in options]
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        body = labels[0]
+    elif len(labels) == 2:
+        body = f"{labels[0]} or {labels[1]}"
+    else:
+        body = f"{', '.join(labels[:-1])}, or {labels[-1]}"
+    return body[0].upper() + body[1:] + "?"
+
+
+# Normalize common recovery phrasings to the labels features use, so "retry"
+# resolves a "try again" option and "forget it" a "skip" one.
+# (Cancel phrases like "forget it" / "never mind" are handled earlier by
+# _CANCEL as "give up" — not listed here.)
+_RECOVERY_SYN = [
+    (re.compile(r"\b(retry|try it again|again)\b", re.I), "try again"),
+    (re.compile(r"\b(leave it|skip it|skip this)\b", re.I), "skip"),
+    (re.compile(r"\b(kill it|force kill|force close)\b", re.I), "force it"),
+    (re.compile(r"\b(a different one|another one)\b", re.I), "another"),
+]
+
+
 def _match_option(text: str, options):
-    """Best (label, action) match for a clarification answer, or None. Exact /
-    substring first, then a fuzzy fallback so 'the upstairs one' matches
-    'upstairs'."""
+    """Best (label, action) match for a clarification / recovery answer, or
+    None. Recovery synonyms first, then exact / substring, then a fuzzy fallback
+    so 'the upstairs one' matches 'upstairs'."""
+    for rx, repl in _RECOVERY_SYN:
+        text = rx.sub(repl, text)
     for label, action in options:
         lab = _norm(label)
         if lab and (lab in text or text in lab):
@@ -189,11 +218,17 @@ class ConversationEngine:
 
     def __init__(self, router: Callable[[str, bool], Any],
                  engaged_signal: Optional[Callable[[], bool]] = None, *,
+                 resolver: Optional[Callable[[Any], Any]] = None,
                  followup_ttl: float = 0.0, awaiting_ttl: float = 12.0,
                  extend_by: float = 20.0):
         # router(text, followup) → response | Outcome. `followup` is True on
         # no-wake turns so the router can gate the LLM fallback.
         self.router = router
+        # resolver(result) → result: main-provided hook that turns a Verified
+        # into its final message (or a Failed with recovery when a checked side
+        # effect didn't take). Runs on every result the engine applies — router
+        # output AND recovery/confirmation action returns. Identity by default.
+        self.resolver = resolver or (lambda r: r)
         self.engaged_signal = engaged_signal or (lambda: False)
         self.followup_ttl = float(followup_ttl)
         self.awaiting_ttl = float(awaiting_ttl)
@@ -272,7 +307,17 @@ class ConversationEngine:
             return None                     # no option matched → new command
         return None
 
+    def fail(self, message: str, recovery=None) -> StepResult:
+        """Enter error recovery directly (e.g. from a handler exception in main).
+        Speaks the message + a recovery menu and stays engaged."""
+        return self._apply(Failed(message, recovery or []))
+
     def _apply(self, result) -> StepResult:
+        # Resolve a Verified (run its side-effect check) to its final message or
+        # a Failed-with-recovery, before deciding state. Covers router output
+        # and confirmation/recovery action returns alike.
+        result = self.resolver(result)
+
         # A migrated feature returned a structured Outcome. The prompt is SPOKEN
         # (docs audit #3 — prompts were previously Silent/unspoken) and the mic
         # stays open so the answer needs no wake word.
@@ -292,10 +337,17 @@ class ConversationEngine:
             self._touch(self.awaiting_ttl)
             return StepResult(say=result.prompt, listen=True, ttl=self.awaiting_ttl)
         if isinstance(result, Failed):
-            # Recovery-menu matching is Phase 4; Phase 2 speaks the message + waits.
+            # Recoverable failure → speak the problem + a spoken recovery menu
+            # ("try again, force it, or skip?") and resolve the answer against
+            # the options next turn. Conversation stays alive (docs §9).
+            self._pending_options = list(result.recovery)
             self.state = State.RETRY_PENDING
             self._touch(self.awaiting_ttl)
-            return StepResult(say=result.message, listen=True, ttl=self.awaiting_ttl)
+            prompt = result.message
+            menu = _menu(result.recovery)
+            if menu:
+                prompt = f"{result.message} {menu}"
+            return StepResult(say=prompt, listen=True, ttl=self.awaiting_ttl)
         if isinstance(result, Done):
             result = result.message         # render/engage like a plain reply
 

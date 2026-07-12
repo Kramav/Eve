@@ -48,9 +48,18 @@ class Intent:
         self._rx = [re.compile(p) for p in self.patterns]
 
     def match(self, text: str):
-        """First regex Match against `text`, or None."""
+        """First WHOLE-UTTERANCE regex Match against `text`, or None.
+
+        `fullmatch`, not `search`: a pattern must account for the entire
+        (normalized) utterance, never just a fragment of it. This is the
+        architectural fix for greedy-verb misfires — a bare `play`/`mute`/`sleep`
+        can no longer be "spotted" inside "look up how to play …". It also makes
+        the registry's `_captured_len` specificity scorer sound: once every match
+        covers the whole utterance, fewer captured chars really does mean a more
+        literal match. Recall for phrasings the strict pattern misses is the LLM
+        fallback + Dynamic Intent Learning tier's job, not this one's."""
         for rx in self._rx:
-            m = rx.search(text)
+            m = rx.fullmatch(text)
             if m:
                 return m
         return None

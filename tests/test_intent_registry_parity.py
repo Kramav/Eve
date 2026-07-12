@@ -1,12 +1,12 @@
-"""Parity proof: the Tier-A registry, built from the live dispatcher INTENTS via
-`from_intents` (position → priority), routes IDENTICALLY to the current
-first-match `for … in INTENTS` loop.
+"""Registry routing corpus + banding invariants.
 
-This is the safety net that makes swapping `dispatch()`'s built-in loop for
-`registry.resolve()` a small, de-risked change: if every phrase resolves to the
-same handler through both paths, the swap is behaviour-preserving. It compares
-the RAW regex ordering (no feature gating) on both sides — apples to apples with
-the actual built-in loop in dispatch().
+Originally this proved the Tier-A registry routed IDENTICALLY to the old
+first-match `re.search` loop. That parity is now intentionally gone: the router
+switched from substring spotting (`re.search`) to whole-utterance matching
+(`fullmatch` on a normalized utterance) to kill the greedy-verb bug class — see
+core.intent_registry.Intent.match and tests/test_greedy_intents.py. So this file
+now guards what still holds: every canonical command phrase resolves sanely
+through the real (banded) registry, and the banding/priority invariants stand.
 
 Run either way:
     pytest tests/
@@ -22,27 +22,10 @@ from core import dispatcher as d
 from core.intent_registry import from_intents
 
 
-def _normalize(text: str) -> str:
-    text = text.strip().lower()
-    text = re.sub(r"[.,!?]+$", "", text).strip()
-    for prefix in d._WAKE_PREFIXES:
-        if text.startswith(prefix):
-            text = text[len(prefix):].strip(",. ")
-            break
-    return text
-
-
-def _first_match_handler(norm: str):
-    """What dispatch()'s built-in loop would fire (raw first match, no gating)."""
-    for pat, handler in d.INTENTS:
-        if re.search(pat, norm):
-            return handler
-    return None
-
-
 # Broad phrase set spanning the tricky, overlap-prone corners of the wall:
 # panels, apps, snap variants, z-order, protect, memory, discord, reminders,
-# identify, autostart, plus a few no-match phrases.
+# identify, autostart. All are whole-utterance commands, so each MUST still
+# resolve to some handler under fullmatch (regressions surface as a None).
 PHRASES = [
     "open app manager", "close app manager", "open window manager",
     "open voice settings", "open command editor", "open api keys",
@@ -64,45 +47,23 @@ PHRASES = [
     "what time is it", "what is the date", "take a screenshot",
     "add eve to startup", "don't start eve at login",
     "mute", "volume up", "help",
-    "asdfjkl gibberish", "the weather is nice today",
 ]
 
-
-def test_registry_parity_with_first_match_loop():
-    reg = from_intents(d.INTENTS, d._HANDLER_FEATURE)
-    mismatches = []
-    for phrase in PHRASES:
-        norm = _normalize(phrase)
-        want = _first_match_handler(norm)
-        hit = reg.best(norm)                       # default feature_get = all enabled
-        got = hit[0].handler if hit else None
-        if got is not want:
-            mismatches.append(
-                (phrase,
-                 getattr(got, "__name__", None),
-                 getattr(want, "__name__", None)))
-    assert not mismatches, "registry != first-match for:\n" + "\n".join(
-        f"  {p!r}: registry={g}  first-match={w}" for p, g, w in mismatches)
+# These are NOT commands — they must resolve to nothing in the registry.
+NON_COMMANDS = ["asdfjkl gibberish", "the weather is nice today"]
 
 
-def test_banded_registry_matches_first_match_on_canonical_phrases():
-    """The BANDED registry dispatch() actually uses (catch-alls demoted to a
-    lower band; specificity resolves the rest) still routes every canonical
-    phrase to the same handler as the old first-match loop — i.e. demoting the
-    catch-alls + letting specificity take over is behaviour-preserving on real
-    commands, while removing the list-position fragility."""
+def test_canonical_phrases_still_route():
     reg = d._registry()
-    mismatches = []
-    for phrase in PHRASES:
-        norm = _normalize(phrase)
-        want = _first_match_handler(norm)
-        hit = reg.best(norm)
-        got = hit[0].handler if hit else None
-        if got is not want:
-            mismatches.append(
-                (phrase, getattr(got, "__name__", None), getattr(want, "__name__", None)))
-    assert not mismatches, "banded registry != first-match for:\n" + "\n".join(
-        f"  {p!r}: banded={g}  first-match={w}" for p, g, w in mismatches)
+    dead = [p for p in PHRASES if reg.best(d.normalize(p)) is None]
+    assert not dead, "canonical phrases no longer route under fullmatch:\n" + "\n".join(dead)
+
+
+def test_non_commands_do_not_route():
+    reg = d._registry()
+    hits = [(p, reg.best(d.normalize(p))) for p in NON_COMMANDS]
+    bad = [(p, h[0].name) for p, h in hits if h is not None]
+    assert not bad, f"non-commands wrongly matched: {bad}"
 
 
 def test_catchalls_demoted_below_specifics():

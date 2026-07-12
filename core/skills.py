@@ -97,7 +97,7 @@ def _run(intents: list, text: str):
     non-match so one broken skill can't break dispatch."""
     from core import features as _features
     for _prio, rx, handler, feature in intents:
-        m = rx.search(text)
+        m = rx.fullmatch(text)   # whole-utterance match — see intent_registry.Intent.match
         if not m:
             continue
         if feature and not _features.get(feature):

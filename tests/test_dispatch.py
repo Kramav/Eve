@@ -40,13 +40,7 @@ def route(text: str):
     Tests the REAL router — the scored intent registry dispatch() uses (banded
     priorities + literal-match specificity), with feature gating applied — and
     returns the handler object instead of calling it."""
-    text = text.strip().lower()
-    text = re.sub(r"[.,!?]+$", "", text).strip()
-    for prefix in d._WAKE_PREFIXES:
-        if text.startswith(prefix):
-            text = text[len(prefix):].strip(",. ")
-            break
-    hit = d._registry().best(text, feature_get=features.get)
+    hit = d._registry().best(d.normalize(text), feature_get=features.get)
     return hit[0].handler if hit is not None else None
 
 
@@ -502,6 +496,17 @@ def test_snap_dangling_zone_prompts():
     r = str(tiling.snap_app("steam", "to")).lower()
     assert "where" in r, r
     S.reset()
+
+
+def test_play_pause_only_matches_bare_command():
+    # "play"/"pause" buried mid-sentence must NOT toggle media (the reported bug:
+    # "look up a guide on how to play spiderman" silently hit media_play_pause
+    # and returned empty). Bare media commands still route.
+    assert route("play") is system.media_play_pause
+    assert route("pause") is system.media_play_pause
+    assert route("play music") is system.media_play_pause
+    assert route("look up a guide on how to play spiderman") is search.web_search_list
+    assert route("do a search for a guide on how to play spiderman") is search.web_search_list
 
 
 def test_followup_gates_the_llm_fallback():

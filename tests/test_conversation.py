@@ -149,12 +149,80 @@ def test_outcomes_speak_prompt_and_set_awaiting_states():
         (NeedConfirm(action=lambda: "x", prompt="sure?"), State.AWAITING_CONFIRMATION, "sure?"),
         (NeedClarify("which?", [("a", None)]),  State.AWAITING_CLARIFICATION, "which?"),
         (NeedSlot("minutes", "how long?"),      State.AWAITING_SLOT,          "how long?"),
-        (Failed("device unreachable", [("retry", None)]), State.RETRY_PENDING, "device unreachable"),
     ]:
         eng, r = _engine(outcome)
         step = eng.handle(UserTurn("do the thing"))
         assert step.say == prompt and step.listen and step.ttl == 12   # prompt SPOKEN
         assert step.response is None and eng.state is want
+
+
+# ── error recovery (Phase 4) ─────────────────────────────────────────────────
+
+def test_failed_speaks_message_plus_menu():
+    eng, r = _engine(Failed("I couldn't close it.",
+                            [("try again", lambda: "ok"), ("force it", lambda: "ok"),
+                             ("skip", lambda: "left it")]))
+    step = eng.handle(UserTurn("close it"))
+    assert step.say == "I couldn't close it. Try again, force it, or skip?"
+    assert eng.state is State.RETRY_PENDING and step.listen
+
+
+def test_recovery_option_runs_and_synonyms():
+    for answer in ("try again", "retry", "again"):
+        ran = []
+        eng, r = _engine(Failed("still open.",
+                                [("try again", lambda: ran.append("retry") or "Done."),
+                                 ("skip", lambda: "left it")]))
+        eng.handle(UserTurn("close it"))
+        step = eng.handle(UserTurn(answer))
+        assert ran == ["retry"] and step.response == "Done.", answer
+    # "leave it" resolves the skip option (runs its action)
+    eng, r = _engine(Failed("still open.",
+                            [("try again", lambda: "retry"),
+                             ("skip", lambda: "Okay, left it.")]))
+    eng.handle(UserTurn("close it"))
+    step = eng.handle(UserTurn("leave it"))
+    assert step.response == "Okay, left it."
+
+
+def test_cancel_during_recovery_gives_up():
+    # "never mind" during a recovery menu ends the conversation (give up),
+    # rather than running a recovery action.
+    eng, r = _engine(Failed("still open.", [("try again", lambda: "retry")]))
+    eng.handle(UserTurn("close it"))
+    step = eng.handle(UserTurn("never mind"))
+    assert step.say and step.listen is False and eng.state is State.IDLE
+
+
+def test_fail_entrypoint_for_exceptions():
+    eng, r = _engine("Done")
+    ran = []
+    step = eng.fail("Something went wrong.",
+                    [("try again", lambda: ran.append(1) or "Retried.")])
+    assert step.say == "Something went wrong. Try again?" and eng.state is State.RETRY_PENDING
+    step = eng.handle(UserTurn("try again"))
+    assert ran == [1] and step.response == "Retried."
+
+
+def test_resolver_turns_failed_verified_into_recovery():
+    # main's resolver hook: a "Verified" whose check fails becomes a Failed with
+    # recovery. Simulate with a marker object the fake resolver converts.
+    from core.response import Verified
+    v = Verified("Closed it.", check=lambda: False, on_fail="Still running.",
+                 recovery=[("try again", lambda: "Retried."), ("skip", lambda: "left it")])
+
+    def resolver(result):
+        if isinstance(result, Verified):
+            return Failed(result.on_fail, result.recovery)   # check "failed"
+        return result
+
+    r = _Router(v)
+    eng = ConversationEngine(router=r, resolver=resolver, awaiting_ttl=12)
+    step = eng.handle(UserTurn("close it"))
+    assert eng.state is State.RETRY_PENDING
+    assert "Still running." in step.say and "try again" in step.say.lower()
+    step = eng.handle(UserTurn("try again"))
+    assert step.response == "Retried."
 
 
 def test_done_outcome_grace_window():

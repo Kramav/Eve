@@ -17,19 +17,24 @@ class Verified(str):
                  learned to be slow to launch.
       delay:     seconds to wait before each check (most effects are async — a
                  launched window or a paused printer take a beat to appear).
+      recovery:  optional [(label, action), …] offered when the check finally
+                 fails — the Conversation Engine speaks them as a spoken
+                 "try again / force it / skip?" menu and stays engaged instead
+                 of dead-ending (docs §9). Ignored by the legacy path.
 
     Resolved by `core.verify.resolve()`, wired into main.on_command behind the
     `verify_commands` feature flag. Subclasses str, so any caller that doesn't
     know about verification (e.g. a test) just sees the optimistic message."""
 
     def __new__(cls, message, *, check, on_fail, retry=None, announce=None,
-                delay=1.0):
+                delay=1.0, recovery=None):
         s = super().__new__(cls, message)
         s.check    = check
         s.on_fail  = on_fail
         s.retry    = retry
         s.announce = announce
         s.delay    = float(delay)
+        s.recovery = recovery or []
         return s
 
 

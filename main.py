@@ -1,5 +1,8 @@
 import ctypes
+import os
 import re
+import signal
+import subprocess
 import time
 import threading
 
@@ -44,6 +47,23 @@ import commands.context  as _ctx_cmd
 
 def main():
     print("Starting Eve...")
+
+    # Guarantee Ctrl+C always kills Eve, even if a worker thread is blocked (e.g.
+    # a slow LLM-fallback HTTP call). The default SIGINT only reaches the main
+    # thread; force a hard exit and take the Tauri UI child with us so it can't
+    # be orphaned into a black ghost window.
+    def _force_quit(_signum, _frame):
+        print("\nShutting down Eve.")
+        try:
+            subprocess.run(['taskkill', '/F', '/IM', 'eve-tauri.exe'],
+                           capture_output=True)
+        except Exception:
+            pass
+        os._exit(0)
+    try:
+        signal.signal(signal.SIGINT, _force_quit)
+    except Exception:
+        pass
 
     display = Display()
     speaker = Speaker()
@@ -129,8 +149,19 @@ def main():
                     if _features.get('tts'):
                         speaker.speak(response.announce)
                 response, verify_ok = _verify.resolve(response)
-        print(f"Eve: {response}")
         return response, verify_ok
+
+    def _engine_resolver(result):
+        """The engine's resolver hook: turn a Verified into its final message —
+        or, when a checked side effect fails and the handler offered recovery
+        options, into a Failed so the engine speaks a 'try again / skip?' menu
+        and stays engaged. Runs on router output AND recovery-action returns."""
+        if isinstance(result, Verified):
+            final, ok = _resolve(result)
+            if (not ok) and result.recovery:
+                return _ConvFailed(final, list(result.recovery))
+            return final
+        return result
 
     def _present(response, verify_ok):
         """Render a resolved response to the HUD (+ TTS). Returns
@@ -164,7 +195,8 @@ def main():
         return 2, False
 
     def _say(line):
-        """Speak an engine-owned line (an ack or a cancel)."""
+        """Speak an engine-owned line (an ack, prompt, or recovery menu)."""
+        print(f"Eve: {line}")
         display.update(status="Eve", text=line, color="processing")
         display.log("action", line)
         if _features.get('tts'):
@@ -204,6 +236,7 @@ def main():
         # can't trigger a chatty loop; only wake-initiated turns reach the LLM.
         router=lambda t, followup: _dispatcher_mod.dispatch(t, allow_fallback=not followup),
         engaged_signal=_engaged_signal,
+        resolver=_engine_resolver,      # resolves Verified → final / Failed(recovery)
         followup_ttl=config.CONV_FOLLOWUP_TTL,
         awaiting_ttl=config.CONV_AWAITING_TTL,
         extend_by=config.CONV_EXTEND_BY,

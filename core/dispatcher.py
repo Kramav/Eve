@@ -369,8 +369,10 @@ INTENTS = [
     # Direct navigation
     (r"(?:go to|navigate to|take me to|visit|browse to)\s+(.+)",  search.go_to_site),
 
-    # Web search (after YouTube so "search youtube" is caught above)
-    (r"(?:search for|look up|google|search|find)\s+(.+)",         search.web_search_list),
+    # Web search (after YouTube so "search youtube" is caught above). The
+    # optional "do a/an" lead-in keeps whole-utterance phrasings like "do a
+    # search for X" matching now that patterns must cover the entire utterance.
+    (r"(?:do (?:a |an )?)?(?:search(?: for| the web for)?|look up|google|find)\s+(.+)",  search.web_search_list),
 
     # Date / time
     (r"what(?:'?s| is) (?:the )?time|what time is it",          system.get_time),
@@ -411,10 +413,14 @@ INTENTS = [
     (r"\bleave\s+(?:the\s+)?(?:voice|call|discord)\b",                                        discord_cmd.disconnect),
 
     (r"\b(?:mute|unmute)\b",                                     system.toggle_mute),
-    # \b required: without it "play" matches inside "dis*play*" (broke
-    # "name monitor 2 primary display"). The registry's specificity scorer
-    # surfaced this latent bug that the old list order had masked.
-    (r"\b(?:pause|play|resume)\b",                               system.media_play_pause),
+    # Anchored to a bare media command (optionally "play music" / "pause the
+    # music", optional "can you …"). Without the anchor, "play"/"pause" matched
+    # mid-sentence — "look up a guide on how to PLAY spiderman" silently toggled
+    # media and returned nothing. Bare "play X" (with an argument) is YouTube's,
+    # handled earlier by the preempt skill.
+    (r"^(?:(?:can you|could you|please|hey)\s+)?(?:pause|play|resume|unpause)"
+     r"(?:\s+(?:music|the\s+music|media|playback|the\s+song|song|it|this|that))?$",
+                                                                 system.media_play_pause),
     (r"\bnext\s+(?:song|track|one)\b",                           system.media_next),
     (r"\b(?:previous|last|back)\s+(?:song|track|one)\b",         system.media_prev),
 
@@ -439,7 +445,7 @@ _BARE_ZORDER_INTENTS = [
 # Splice them in just before the web-search pattern so "google chrome to front"
 # beats "google <query>", while explicit z-order verbs higher up still win.
 _WEB_SEARCH_IDX = next(
-    i for i, (pat, h) in enumerate(INTENTS) if 'search for' in pat
+    i for i, (pat, h) in enumerate(INTENTS) if h is search.web_search_list
 )
 INTENTS[_WEB_SEARCH_IDX:_WEB_SEARCH_IDX] = _BARE_ZORDER_INTENTS
 
@@ -461,6 +467,34 @@ _HANDLER_FEATURE = {
 }
 
 from config import WAKE_PREFIXES as _WAKE_PREFIXES
+
+# Leading conversational filler, stripped so whole-utterance (fullmatch) patterns
+# don't each have to re-encode it. Repeatable ("hey can you just …" → "…"). Only
+# LEADING filler — trailing words are real arguments ("remind me to call mom
+# now") and must survive.
+_LEADING_FILLER = re.compile(
+    r"^(?:can you|could you|would you|will you|please|hey|just|"
+    r"go ahead and|i want to|i wanna|i need to|let's|lets)\s+")
+
+
+def normalize(text: str) -> str:
+    """Canonical utterance form shared by dispatch(), the tests' route(), and the
+    matchers: lowercase, strip trailing punctuation, strip a leading wake word,
+    strip leading filler. Whole-utterance matching keys off this — see
+    core.intent_registry.Intent.match."""
+    text = text.strip().lower()
+    text = re.sub(r"[.,!?]+$", "", text).strip()   # trailing punctuation Whisper adds
+    for prefix in _WAKE_PREFIXES:
+        if text.startswith(prefix):
+            text = text[len(prefix):].strip(",. ")
+            break
+    while True:                                    # peel repeated leading filler
+        peeled = _LEADING_FILLER.sub("", text)
+        if peeled == text:
+            break
+        text = peeled
+    return text
+
 
 _ORDINALS = {
     "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5,
@@ -571,9 +605,10 @@ def _apply_mishear_subs(text: str) -> str:
 
 
 def _try_intents(text: str):
-    """Run text against the INTENTS regex table. Returns response or None."""
+    """Run text against the INTENTS regex table. Returns response or None.
+    Whole-utterance (fullmatch) — same contract as the scored registry."""
     for pattern, handler in INTENTS:
-        m = re.search(pattern, text)
+        m = re.fullmatch(pattern, text)
         if m:
             feat = _HANDLER_FEATURE.get(handler)
             if feat and not _features.get(feat):
@@ -794,14 +829,7 @@ def dispatch(text: str, allow_fallback: bool = True):
     ambient speech and questions not addressed to Eve don't get answered by the
     chatty LLM — an unmatched follow-up returns None and the conversation ends,
     instead of turning Eve into a runaway chatbot on an open mic."""
-    text = text.strip().lower()
-    text = re.sub(r"[.,!?]+$", "", text).strip()  # strip trailing punctuation Whisper adds
-
-    # Strip wake word if Whisper caught it
-    for prefix in _WAKE_PREFIXES:
-        if text.startswith(prefix):
-            text = text[len(prefix):].strip(",. ")
-            break
+    text = normalize(text)   # lowercase, strip trailing punct + wake word + leading filler
 
     # --- Pending confirmation? ---
     # If the previous utterance was a medium-confidence guess, this utterance

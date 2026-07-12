@@ -26,7 +26,9 @@ import urllib.error
 
 import config
 
-_TIMEOUT_S = 45  # covers llama-swap cold-loading the model + CPU first token
+_TIMEOUT_S = 12  # a voice assistant can't block the command thread for long;
+                 # a cold model load that overruns this just degrades to
+                 # "not recognized" rather than hanging Eve.
 
 _SYSTEM = (
     "You are Eve, a local Windows voice assistant. If the user is asking you to "
