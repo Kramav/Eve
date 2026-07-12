@@ -128,7 +128,10 @@ def test_youtube_routing():
     yt = _youtube_mod()
     assert _yt_route(yt, "browse youtube") is yt.browse_feed_intent
     assert _yt_route(yt, "open the youtube feed") is yt.browse_feed_intent
-    assert _yt_route(yt, "open youtube") is yt.browse_home_intent
+    # "open youtube" now defaults to the controllable HUD feed (2026-07-11 fix);
+    # the plain browser is an explicit opt-out.
+    assert _yt_route(yt, "open youtube") is yt.browse_feed_intent
+    assert _yt_route(yt, "open youtube in my browser") is yt.browse_home_intent
     assert _yt_route(yt, "play lofi beats") is yt.play_or_search
     assert _yt_route(yt, "search youtube for jazz") is yt.play_or_search
 

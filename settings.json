@@ -4,8 +4,8 @@
     "noise_scale": 0.8,
     "noise_w": 0.75
   },
-  "overlayDisplayId": "\\\\.\\DISPLAY1",
-  "overlayCorner": "bottom-right",
+  "overlayDisplayId": "\\\\.\\DISPLAY3",
+  "overlayCorner": "bottom-left",
   "ui_scale": 1.4,
   "windowState": {
     "window-manager": {

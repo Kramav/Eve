@@ -799,6 +799,10 @@ class Display:
 
     def youtube_browse(self):
         self._emit({'type': 'youtube_browse'})
+        # Number the tiles once the page has had a moment to load, so a numbered
+        # list appears on open (no separate "number the videos" needed). Runs on
+        # the WS loop — never blocks the voice thread.
+        self._emit_after(2.5, {'type': 'youtube_number'})
 
     def youtube_scroll(self, direction: str):
         self._emit({'type': 'youtube_scroll', 'dir': str(direction)})
@@ -819,10 +823,18 @@ class Display:
         self._emit({'type': 'youtube_close'})
 
     def _emit(self, msg: dict):
-        """Fire-and-forget broadcast of a typed directive to all Electron clients."""
+        """Fire-and-forget broadcast of a typed directive to all UI clients."""
         asyncio.run_coroutine_threadsafe(
             self._push_all(json.dumps(msg)), self._loop
         )
+
+    def _emit_after(self, delay: float, msg: dict):
+        """Broadcast a directive after *delay* seconds, on the WS loop (never
+        blocks the caller). Used for load-timed follow-ups like feed numbering."""
+        async def _later():
+            await asyncio.sleep(delay)
+            await self._push_all(json.dumps(msg))
+        asyncio.run_coroutine_threadsafe(_later(), self._loop)
 
     # ── Public API: HUD state (same interface as before) ────────────────────
 

@@ -176,14 +176,16 @@ def browse_home_intent():
 
 
 def browse_feed_intent():
-    """Open the YouTube feed in the HUD browser and claim feed follow-ups."""
+    """Open the YouTube feed in the HUD browser and claim feed follow-ups.
+    Display auto-numbers the tiles once the page loads, so a numbered list
+    appears without a separate 'number the videos' command."""
     global _state
     if _display is None:
         return "The overlay isn't running."
     _display.youtube_browse()
     _state = "feed"
     _arm()
-    return "Browsing YouTube"
+    return "Opening YouTube — say a number to pick a video."
 
 
 def play_or_search(query: str):
@@ -442,8 +444,13 @@ def _play_converse(text: str):
 # Order mirrors the old core block: feed-browse before browser-home, search/play
 # before they can be read as open_app / web_search.
 INTENTS = [
-    (r"(?:browse|open|show)\s+(?:the\s+)?youtube\s+feed|^browse\s+youtube$", browse_feed_intent),
-    (r"(?:open|launch|browse|show(?: me)?) (?:youtube|yt)(?:\s+home(?:page)?)?|^youtube$", browse_home_intent),
+    # Explicit "in my browser" escape hatch — must precede the general catch so
+    # "open youtube in my browser" / "youtube homepage" opts out of the HUD.
+    (r"(?:open|show)\s+youtube\s+(?:home(?:page)?|in\s+(?:my|the)\s+browser)", browse_home_intent),
+    # Default: the controllable HUD feed (numbered, voice-driven) — the whole
+    # point of the YouTube feature. Catches "open youtube", "browse youtube",
+    # "help me browse youtube", "show me youtube", "open the youtube feed".
+    (r"(?:browse|open|launch|show)(?:\s+me)?\s+(?:the\s+)?(?:youtube|yt)(?:\s+feed)?\b|^youtube$", browse_feed_intent),
     (r"(?:search youtube|youtube)(?:\s+for)?\s+(.+)",            play_or_search),
     # \b prevents matching "play" inside "display", "watch" inside "watchful".
     (r"\b(?:play|watch)\s+(.+)",                                 play_or_search),

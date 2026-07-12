@@ -121,6 +121,15 @@ search by voice — the game should keep focus in all three.
 > that lived experience rather than a release checklist.
 
 **Order of priority (higher beats lower when time is scarce):**
+0. **★ Conversation Engine (TOP PRIORITY, 2026-07-11).** Rework the conversation system so Eve is a
+   persistent conversational partner, not a wake-word command parser: multi-turn context, graceful
+   failure recovery, follow-up questions, disambiguation, and **no wake word between turns** while a
+   conversation is active. Architecture designed + approved — hybrid hierarchical state machine +
+   event-driven turn intake + ConversationContext stack + a single structured Outcome protocol every
+   feature returns. **This refactor takes precedence over incremental conversational fixes and new
+   features.** Full design, audit, state chart, and migration map:
+   [docs/CONVERSATION_ARCHITECTURE.md](docs/CONVERSATION_ARCHITECTURE.md). Build phased behind a
+   `conversation_engine` feature flag, old path runnable side-by-side.
 1. **Engine capability — UI/UX automation skills.** Expand the skill system with *broadly useful*
    capabilities, especially controlling and interacting with arbitrary desktop application windows.
    Push reliability until Eve can confidently operate *most* app interfaces. Prioritize skills that
@@ -155,6 +164,7 @@ next. Links point to the detail.
 
 | Priority | Workstream | Status |
 |----------|-----------|--------|
+| **★ TOP PRIORITY · Conversation Engine** | Rework conversation system → persistent, multi-turn, recovers from failure, no wake word between turns. Design approved (hybrid HSM + event intake + context stack + structured Outcome protocol). | ⏳ **design DONE 2026-07-11** → [docs/CONVERSATION_ARCHITECTURE.md](docs/CONVERSATION_ARCHITECTURE.md); build phased behind `conversation_engine` flag. Refactor takes precedence over new conversational features. |
 | **1 · Capability** | Window quick-actions skill | ✅ shipped ([skills/window_actions.py](skills/window_actions.py)) |
 | **1 · Capability** | More UI/UX automation skills; harden Visual Navigation via daily use | ⏳ next → [Skill Library](#skill-library--candidate-drop-in-skills), [Visual Navigation](#visual-navigation-skill--phase-1-done-phase-2-mostly-done-2d-onnx-detector-pending) |
 | **1 · Flagship promise** | Focus invariant: app-launch + HUD-open focus-steal | ✅ fixed → *Reference · Focus-policy audit* |

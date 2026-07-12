@@ -127,6 +127,8 @@ _CLOSE_MAP = {
     "obs":       "obs64.exe",
     "vlc":       "vlc.exe",
     "slack":     "slack.exe",
+    "task manager": "Taskmgr.exe",
+    "taskmgr":      "Taskmgr.exe",
 }
 
 
@@ -278,10 +280,81 @@ def _resolve_close_exe(name: str) -> str:
     return exe
 
 
+def _running_image_names() -> list:
+    """Image names of every running process, e.g. ['chrome.exe', 'Taskmgr.exe']."""
+    try:
+        out = subprocess.run(['tasklist', '/fo', 'csv', '/nh'], capture_output=True,
+                             text=True, creationflags=_NO_WINDOW).stdout
+    except Exception:
+        return []
+    names = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith('"'):
+            names.append(line[1:].split('"', 1)[0])   # first CSV field
+    return names
+
+
+# Common system processes we never want to suggest closing/killing.
+_SUGGEST_BLOCKLIST = {
+    "explorer.exe", "svchost.exe", "system", "csrss.exe", "winlogon.exe",
+    "services.exe", "lsass.exe", "dwm.exe", "python.exe", "pythonw.exe",
+    "conhost.exe", "runtimebroker.exe", "eve-tauri.exe", "electron.exe",
+}
+
+
+def _suggest_running(name: str):
+    """Closest RUNNING process to the spoken `name`, or None. Returns the
+    friendly base (no .exe). Used to turn a dead-end "isn't running" into an
+    actionable "did you mean X?" — mishears ("chrom" → chrome) and unmapped
+    apps whose window name ≈ image name."""
+    try:
+        from rapidfuzz import process, fuzz
+    except ImportError:
+        return None
+    procs = [p for p in _running_image_names() if p.lower() not in _SUGGEST_BLOCKLIST]
+    if not procs:
+        return None
+    # Map each base name (lowercased, no .exe) → its display base, then fuzzy
+    # match the spoken name against the bases.
+    bases = {}
+    for p in procs:
+        base = p[:-4] if p.lower().endswith(".exe") else p
+        bases.setdefault(base.lower(), base)   # first casing wins
+    hit = process.extractOne(name.lower(), list(bases.keys()),
+                             scorer=fuzz.token_sort_ratio, score_cutoff=72)
+    if hit is None:
+        return None
+    return bases[hit[0]]                        # (choice, score, index) → choice
+
+
+def _not_running(name: str, action) -> str:
+    """Response when `name` isn't running: offer the closest running process as
+    a 'did you mean X?' (a spoken yes re-runs `action` on it), or say so plainly.
+    Skips the suggestion if it just resolves back to the same name."""
+    sug = _suggest_running(name)
+    if sug and sug.lower() != name.lower():
+        try:
+            from core.session import get
+            verb = "close" if action is close_app else "kill"
+            get().pending_confirm = (action, (sug,), f"{verb} {sug}")
+            return f"I don't see {name} running. Did you mean {sug}?"
+        except Exception:
+            pass
+    return f"{name} isn't running."
+
+
 def close_app(name: str) -> str:
     """Graceful close — sends WM_CLOSE, lets the app save and exit cleanly."""
     name = name.strip()
     exe  = _resolve_close_exe(name)
+
+    # Honest guard: if nothing's running under this exe name, don't taskkill a
+    # phantom and let `_count_proc == 0` read as a false success (the old "close
+    # task manager" → 'task manager.exe' bug). Offer the closest running process
+    # as a spoken "did you mean X?" (answer yes → close it), else say so plainly.
+    if _count_proc(exe) == 0:
+        return _not_running(name, close_app)
 
     def _do():
         subprocess.run(['taskkill', '/im', exe], capture_output=True,
@@ -307,6 +380,9 @@ def kill_app(name: str) -> str:
     """Force kill — immediately terminates the process, no save prompt."""
     name = name.strip()
     exe  = _resolve_close_exe(name)
+
+    if _count_proc(exe) == 0:
+        return _not_running(name, kill_app)
 
     def _do():
         subprocess.run(['taskkill', '/f', '/im', exe], capture_output=True,

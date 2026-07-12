@@ -111,15 +111,25 @@ def test_app_delay_bumps_decays_and_clamps():
         apps._LAUNCH_FILE = orig
 
 
-def test_close_app_returns_verified():
-    # Closing a name nothing is running under is harmless; the verifier confirms
-    # immediately because no such process exists.
+def test_close_app_not_running_is_honest():
+    # Closing a name nothing is running under must NOT report a false "Closed"
+    # (the 2026-07-11 task-manager bug) — it says so plainly instead.
     from commands import apps
     r = apps.close_app("definitely-not-a-real-app-zzz")
-    assert isinstance(r, Verified)
-    r.delay = 0
-    msg, ok = verify.resolve(r)
-    assert ok and "Closed" in msg
+    assert not isinstance(r, Verified)
+    assert "isn't running" in r
+
+
+def test_close_running_app_returns_verified():
+    # A running app returns an optimistic Verified whose check confirms the exit.
+    from commands import apps
+    old = apps._count_proc
+    apps._count_proc = lambda exe: 1        # pretend it's running
+    try:
+        r = apps.close_app("notepad")
+        assert isinstance(r, Verified) and "Closed" in r
+    finally:
+        apps._count_proc = old
 
 
 # ── feature flag ──────────────────────────────────────────────────────────────
